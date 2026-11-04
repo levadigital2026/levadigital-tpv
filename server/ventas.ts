@@ -100,18 +100,66 @@ export function modificarLinea(db: DB, lineaId: number, datos: { unidades?: numb
   return getCuenta(db, l.cuenta_id);
 }
 
+// Guarda en 'borrados' las líneas que se van a borrar, con los nombres de ese momento.
+function apuntarBorrados(db: DB, cuentaId: number, lineas: Row[], tipo: 'linea' | 'cuenta') {
+  const c = db.prepare(`
+    SELECT c.nombre, c.operario_id, z.nombre AS zona, m.nombre AS mesa, o.nombre AS operario
+    FROM cuentas c JOIN zonas z ON z.id = c.zona_id LEFT JOIN mesas m ON m.id = c.mesa_id
+    LEFT JOIN operarios o ON o.id = c.operario_id WHERE c.id = ?`).get(cuentaId) as Row;
+  const nombreCuenta = [c.zona, c.mesa ?? '', c.nombre].filter(Boolean).join(' · ');
+  const fam = db.prepare('SELECT f.id, f.nombre FROM articulos a JOIN familias f ON f.id = a.familia_id WHERE a.id = ?');
+  const ins = db.prepare(`INSERT INTO borrados (tipo, cuenta_id, cuenta, operario_id, operario, articulo_id, descripcion, familia_id, familia, unidades, precio, importe)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  for (const l of lineas) {
+    const f = (l.articulo_id ? fam.get(l.articulo_id) : undefined) as Row | undefined;
+    ins.run(tipo, cuentaId, nombreCuenta, c.operario_id ?? null, c.operario ?? '', l.articulo_id ?? null, l.descripcion,
+      f?.id ?? null, f?.nombre ?? '', l.unidades, l.precio, importeLinea(l as any));
+  }
+}
+
 export function borrarLinea(db: DB, lineaId: number) {
   const l = db.prepare('SELECT * FROM lineas WHERE id = ?').get(lineaId) as Row | undefined;
   if (!l) throw new ErrorTPV('La línea no existe', 404);
   cuentaAbierta(db, l.cuenta_id);
-  db.prepare('DELETE FROM lineas WHERE id = ?').run(lineaId);
+  tx(db, () => {
+    apuntarBorrados(db, l.cuenta_id, [l], 'linea');
+    db.prepare('DELETE FROM lineas WHERE id = ?').run(lineaId);
+  });
   return getCuenta(db, l.cuenta_id);
 }
 
+// "Borrar todo": borra las líneas y cierra la cuenta. Lo borrado queda en el informe de borrados.
 export function borrarTodasLineas(db: DB, cuentaId: number) {
   cuentaAbierta(db, cuentaId);
-  db.prepare('DELETE FROM lineas WHERE cuenta_id = ?').run(cuentaId);
+  tx(db, () => {
+    const lineas = db.prepare('SELECT * FROM lineas WHERE cuenta_id = ?').all(cuentaId) as Row[];
+    apuntarBorrados(db, cuentaId, lineas, 'cuenta');
+    db.prepare('DELETE FROM lineas WHERE cuenta_id = ?').run(cuentaId);
+    db.prepare("UPDATE cuentas SET estado = 'vacia', cerrada_en = datetime('now') WHERE id = ?").run(cuentaId);
+  });
   return getCuenta(db, cuentaId);
+}
+
+// Informe de borrados entre dos días (AAAA-MM-DD, ambos incluidos).
+export function informeBorrados(db: DB, desde?: string | null, hasta?: string | null) {
+  const dia = (s: string | null | undefined) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null);
+  const d = dia(desde) ?? '0000-01-01';
+  const h = dia(hasta) ?? '9000-01-01';
+  const donde = "WHERE fecha >= ? AND fecha < date(?, '+1 day')";
+  const agrupar = (clave: string) => db.prepare(`
+    SELECT ${clave} AS clave, COUNT(*) AS veces, SUM(unidades) AS unidades, SUM(importe) AS importe
+    FROM borrados ${donde} GROUP BY 1 ORDER BY ${clave === 'substr(fecha, 12, 2)' || clave === 'substr(fecha, 1, 10)' ? '1' : 'importe DESC'}`).all(d, h);
+  const tot = db.prepare(`SELECT COUNT(*) AS lineas, COALESCE(SUM(unidades), 0) AS unidades, COALESCE(SUM(importe), 0) AS importe,
+    COUNT(DISTINCT CASE WHEN tipo = 'cuenta' THEN cuenta_id END) AS cuentas FROM borrados ${donde}`).get(d, h);
+  return {
+    desde: d, hasta: h, totales: tot,
+    por_operario: agrupar("CASE WHEN operario = '' THEN 'Sin operario' ELSE operario END"),
+    por_dia: agrupar('substr(fecha, 1, 10)'),
+    por_hora: agrupar('substr(fecha, 12, 2)'),
+    por_familia: agrupar("CASE WHEN familia = '' THEN 'Sin familia' ELSE familia END"),
+    por_articulo: agrupar('descripcion'),
+    detalle: db.prepare(`SELECT * FROM borrados ${donde} ORDER BY fecha DESC, id DESC LIMIT 1000`).all(d, h),
+  };
 }
 
 // Huella encadenada: cada ticket incluye la huella del anterior, así no se puede

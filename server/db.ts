@@ -161,6 +161,40 @@ CREATE TABLE IF NOT EXISTS conceptos_pago (
   orden INTEGER NOT NULL DEFAULT 0
 );
 
+-- Todo lo que se borra de una cuenta, para el informe de borrados. No se modifica nunca.
+-- La fecha va en hora local del TPV para poder agrupar por hora del servicio.
+CREATE TABLE IF NOT EXISTS borrados (
+  id INTEGER PRIMARY KEY,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  tipo TEXT NOT NULL CHECK (tipo IN ('linea', 'cuenta')),
+  cuenta_id INTEGER,
+  cuenta TEXT NOT NULL DEFAULT '',
+  operario_id INTEGER,
+  operario TEXT NOT NULL DEFAULT '',
+  articulo_id INTEGER,
+  descripcion TEXT NOT NULL,
+  familia_id INTEGER,
+  familia TEXT NOT NULL DEFAULT '',
+  unidades REAL NOT NULL,
+  precio INTEGER NOT NULL,
+  importe INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS borrados_fecha ON borrados (fecha);
+
+-- Registro de actividad: cada cambio hecho en el TPV y cada error.
+CREATE TABLE IF NOT EXISTS registro (
+  id INTEGER PRIMARY KEY,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  nivel TEXT NOT NULL DEFAULT 'info',
+  accion TEXT NOT NULL,
+  metodo TEXT NOT NULL DEFAULT '',
+  ruta TEXT NOT NULL DEFAULT '',
+  estado INTEGER NOT NULL DEFAULT 0,
+  origen TEXT NOT NULL DEFAULT '',
+  datos TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS registro_fecha ON registro (fecha);
+
 -- Comentarios predefinidos para la comanda (con hielo, sin azúcar...).
 -- Sin familia ni artículo valen para todo; si no, solo para esa familia o ese artículo.
 CREATE TABLE IF NOT EXISTS comentarios (
@@ -220,6 +254,8 @@ function migrar(db: DB) {
       const c = db.prepare('INSERT INTO conceptos_pago (nombre, orden) VALUES (?, ?)');
       ['Pago a proveedor', 'Cambio de moneda', 'Retirada de efectivo'].forEach((n, i) => c.run(n, i + 1));
     }
+    // El registro de actividad se guarda 90 días en la base de datos (los ficheros diarios quedan aparte).
+    db.prepare("DELETE FROM registro WHERE fecha < datetime('now', 'localtime', '-90 days')").run();
     if (cuenta(db, 'comentarios') === 0) {
       const c = db.prepare('INSERT INTO comentarios (texto, familia_id, orden) VALUES (?, ?, ?)');
       ['Para llevar', 'Aparte'].forEach((t, i) => c.run(t, null, 100 + i));
@@ -237,7 +273,7 @@ export const ACCIONES: Record<string, string> = {
   nueva: 'Nueva cuenta',
   mesas: 'Ir a mesas',
   borrar_linea: 'Borrar línea',
-  borrar_todo: 'Borrar todo',
+  borrar_todo: 'Borrar todo y cerrar la cuenta',
   detalle: 'Texto de comanda (cocina / barra)',
   comensales: 'Cambiar comensales',
   nombre: 'Nombre de la cuenta',

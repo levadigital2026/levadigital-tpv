@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { type DB, ACCIONES } from './db.ts';
 import * as v from './ventas.ts';
 import * as g from './gestion.ts';
+import { registrar, describir, leerRegistro } from './registro.ts';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TIPOS: Record<string, string> = {
@@ -59,6 +60,9 @@ ruta('POST', '/api/tickets/:id/anular', ({ db, params }) => v.anularTicket(db, n
 ruta('GET', '/api/caja', ({ db }) => v.resumenCaja(db));
 ruta('POST', '/api/caja/cierre', ({ db, body }) => v.cerrarCaja(db, body));
 
+ruta('GET', '/api/informes/borrados', ({ db, url }) => v.informeBorrados(db, url.searchParams.get('desde'), url.searchParams.get('hasta')));
+ruta('GET', '/api/registro', ({ db, url }) => leerRegistro(db, url.searchParams.get('fecha'), url.searchParams.get('q'), url.searchParams.get('nivel')));
+
 ruta('GET', '/api/empresa', ({ db }) => g.getEmpresa(db));
 ruta('PUT', '/api/empresa', ({ db, body }) => g.setEmpresa(db, body));
 ruta('GET', '/api/gestion/:tabla', ({ db, params }) => g.listar(db, params[0]));
@@ -110,6 +114,8 @@ async function estatico(res: ServerResponse, pathname: string) {
 export function crearServidor(db: DB) {
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
+    const origen = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+    let body: any = {};
     try {
       if (url.pathname === '/api/eventos') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
@@ -123,10 +129,13 @@ export function crearServidor(db: DB) {
           if (r.metodo !== req.method) continue;
           const m = r.patron.exec(url.pathname);
           if (!m) continue;
-          const body = r.metodo === 'GET' ? {} : await leerCuerpo(req);
+          body = r.metodo === 'GET' ? {} : await leerCuerpo(req);
           const data = r.handler({ db, params: m.slice(1).map(decodeURIComponent), body, url });
           json(res, 200, data);
-          if (r.cambia) avisar(url.pathname.split('/')[2]);
+          if (r.cambia) {
+            registrar(db, { accion: describir(r.metodo, url.pathname), metodo: r.metodo, ruta: url.pathname, estado: 200, origen, datos: body });
+            avisar(url.pathname.split('/')[2]);
+          }
           return;
         }
         return json(res, 404, { error: 'Ruta no encontrada' });
@@ -136,6 +145,13 @@ export function crearServidor(db: DB) {
     } catch (e: any) {
       const status = e instanceof v.ErrorTPV ? e.status : 500;
       if (status === 500) console.error(e);
+      if (url.pathname.startsWith('/api/')) {
+        const metodo = req.method ?? '';
+        registrar(db, {
+          nivel: status >= 500 ? 'error' : 'aviso', accion: `${describir(metodo, url.pathname)}: ${status === 500 ? String(e?.message ?? e) : e.message}`,
+          metodo, ruta: url.pathname, estado: status, origen, datos: body,
+        });
+      }
       json(res, status, { error: status === 500 ? 'Error interno del servidor' : e.message });
     }
   });

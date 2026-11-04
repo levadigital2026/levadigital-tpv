@@ -149,6 +149,22 @@ tr.anulado td { color: var(--suave); text-decoration: line-through; }
 .comanda .botones-modal { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
 .comanda .botones-modal button { padding: 12px 18px; font-weight: 600; }
 
+.informe { padding: 12px 16px; height: 100%; display: flex; flex-direction: column; gap: 10px; }
+.informe h3 { margin: 8px 0 6px; font-size: 14px; color: var(--suave); text-transform: uppercase; letter-spacing: .5px; }
+.informe .cifras { padding: 0; }
+.filtros { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.filtros label { display: grid; gap: 4px; font-size: 13px; color: var(--suave); }
+.filtros input, .filtros select { font: inherit; padding: 9px 10px; border: 1px solid var(--borde); border-radius: 8px; background: var(--panel); }
+.filtros button { padding: 10px 14px; font-weight: 600; }
+.grupos-inf { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.grupo-inf { background: var(--panel); border: 1px solid var(--borde); border-radius: var(--radio); padding: 4px 8px 8px; }
+.informe .panel { flex: none; }
+.nota { margin: 0; color: var(--suave); font-size: 13px; }
+tr.nivel-aviso td { background: #fff7e6; }
+tr.nivel-error td { background: #fdecea; }
+td.datos { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--suave); word-break: break-all; max-width: 420px; }
+td small { color: var(--suave); }
+
 /* Pantallas estrechas: PDA y móviles */
 @media (max-width: 1100px) {
   .venta { grid-template-columns: minmax(280px, 38%) 170px 1fr; }

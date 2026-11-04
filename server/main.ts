@@ -6,6 +6,7 @@ import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from './db.ts';
 import { crearServidor } from './app.ts';
+import { registrar, usarCarpetaRegistro } from './registro.ts';
 
 const puerto = Number(process.env.PUERTO ?? 8080);
 const carpeta = process.env.DATOS ?? join(process.cwd(), 'datos');
@@ -13,6 +14,7 @@ mkdirSync(carpeta, { recursive: true });
 
 const db = openDb(join(carpeta, 'tpv.db'));
 db.exec('PRAGMA journal_mode = WAL');
+usarCarpetaRegistro(join(carpeta, 'registro'));
 
 const servidor = crearServidor(db);
 servidor.on('error', (e: NodeJS.ErrnoException) => {
@@ -24,6 +26,7 @@ servidor.on('error', (e: NodeJS.ErrnoException) => {
   throw e;
 });
 servidor.listen(puerto, '0.0.0.0', () => {
+  registrar(db, { accion: `TPV arrancado en el puerto ${puerto}`, origen: 'servidor' });
   console.log(`TPV LevaDigital funcionando en el puerto ${puerto}`);
   console.log(`  En este PC:        http://localhost:${puerto}`);
   for (const lista of Object.values(networkInterfaces())) {

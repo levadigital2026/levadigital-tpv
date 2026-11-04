@@ -130,6 +130,9 @@ test('borrar todas las líneas y botonera configurable', async () => {
     const vacia = (await api('DELETE', `/cuentas/${c.id}/lineas`)).data;
     assert.equal(vacia.lineas.length, 0);
     assert.equal(vacia.total, 0);
+    // Borrar todo también cierra la cuenta.
+    assert.equal(vacia.estado, 'vacia');
+    assert.equal((await api('GET', '/cuentas')).data.length, 0);
 
     const b = ini.botones.find((x: any) => x.accion === 'nombre');
     const cambiado = (await api('PUT', `/gestion/botones/${b.id}`, { texto: 'Poner nombre', visible: false, color: '#ff0000' })).data;
@@ -178,5 +181,38 @@ test('texto de comanda: se cambia para cocina pero el ticket lleva la descripci�
 
     const t = (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: tarjeta.id })).data;
     assert.equal(t.lineas[0].descripcion, 'Café solo');
+  } finally { await cerrar(); }
+});
+
+test('informe de borrados y registro de actividad', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const cafe = ini.articulos.find((a: any) => a.nombre === 'Café solo');
+    const rabas = ini.articulos.find((a: any) => a.nombre === 'Rabas');
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id, nombre: 'esquina' })).data;
+    let cu = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: cafe.id, unidades: 2 })).data;
+    cu = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: rabas.id })).data;
+    await api('DELETE', `/lineas/${cu.lineas[0].id}`);
+    await api('DELETE', `/cuentas/${c.id}/lineas`);
+
+    const r = (await api('GET', '/informes/borrados')).data;
+    assert.equal(r.totales.lineas, 2);
+    assert.equal(r.totales.importe, 280 + 1200);
+    assert.equal(r.totales.cuentas, 1);
+    assert.deepEqual(r.por_familia.map((f: any) => f.clave).sort(), ['Cafés', 'Raciones']);
+    assert.equal(r.por_operario[0].clave, 'Sin operario');
+    assert.equal(r.detalle[0].cuenta, 'Barra · esquina');
+
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: cafe.id }); // cuenta cerrada: error
+    const reg = (await api('GET', '/registro')).data;
+    const acciones = reg.map((x: any) => x.accion);
+    assert.ok(acciones.includes('Borrar todo y cerrar la cuenta'));
+    assert.ok(acciones.includes('Borrar línea'));
+    assert.ok(reg.some((x: any) => x.nivel === 'aviso' && x.estado === 400));
+    assert.ok((await api('GET', '/registro?q=Borrar')).data.every((x: any) => x.accion.includes('Borrar')));
+    await api('POST', '/gestion/operarios', { nombre: 'Ana', pin: '9999' });
+    assert.ok(!JSON.stringify((await api('GET', '/registro')).data).includes('9999'));
   } finally { await cerrar(); }
 });

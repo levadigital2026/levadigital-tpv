@@ -79,7 +79,7 @@ function nombreCuenta(c) {
 }
 
 // ---------- Navegación ----------
-const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa };
+const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro };
 function ir(vista) {
   E.vista = vista;
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
@@ -178,7 +178,8 @@ function accionActiva(accion, c) {
   const conLineas = !!c?.lineas?.length;
   switch (accion) {
     case 'guardar': case 'comensales': case 'nombre': return !!c;
-    case 'preticket': case 'borrar_todo': case 'efectivo_exacto': case 'tarjeta': return conLineas;
+    case 'borrar_todo': return !!c;
+    case 'preticket': case 'efectivo_exacto': case 'tarjeta': return conLineas;
     case 'borrar_linea': case 'detalle': return conLineas && !!E.lineaSel;
     default: return true;
   }
@@ -210,9 +211,11 @@ async function accion(a) {
     case 'configuracion': return ir('config');
     case 'borrar_linea': return borrarLinea(E.lineaSel);
     case 'borrar_todo':
-      if (!confirm('¿Borrar todas las líneas de la cuenta?')) return;
-      E.cuenta = await api('DELETE', `/cuentas/${c.id}/lineas`);
+      if (!confirm(`¿Borrar todo y cerrar la cuenta "${nombreCuenta(c)}"?\nLo borrado quedará en el informe de borrados.`)) return;
+      await api('DELETE', `/cuentas/${c.id}/lineas`);
+      E.cuenta = null;
       E.lineaSel = null;
+      aviso('Cuenta borrada y cerrada');
       return pintarVenta();
     case 'detalle': return editarComanda(E.lineaSel);
     case 'comensales': {
@@ -717,7 +720,11 @@ function cabeceraConfig(titulo) {
 const SECCIONES_CONFIG = [
   ['Uso diario', [
     ['abiertas', 'Cuentas abiertas', 'Ver y recuperar las cuentas sin cobrar'],
-    ['informes', 'Informes', 'Ventas por forma de cobro y por familia'],
+  ]],
+  ['Informes', [
+    ['informes', 'Ventas y caja', 'Ventas por forma de cobro y por familia'],
+    ['borrados', 'Borrados', 'Líneas y cuentas borradas por operario, hora, familia y artículo'],
+    ['registro', 'Registro de actividad', 'Todo lo que pasa en el TPV, con fecha y hora'],
   ]],
   ['Carta', [
     ['articulos', 'Artículos', 'Precios, IVA y familia'],
@@ -754,7 +761,7 @@ function pintarConfig() {
     const b = e.target.closest('[data-ir]');
     if (!b) return;
     const k = b.dataset.ir;
-    if (k === 'abiertas' || k === 'empresa') return ir(k);
+    if (['abiertas', 'empresa', 'borrados', 'registro'].includes(k)) return ir(k);
     if (k === 'informes') return ir('caja');
     E.tablaGestion = k;
     return ir('gestion');
@@ -777,6 +784,83 @@ async function pintarAbiertas() {
     E.lineaSel = null;
     return ir('venta');
   });
+}
+
+// ---------- Informes de configuración ----------
+const hoyLocal = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+
+function tablaGrupo(titulo, filas, etiqueta = x => x) {
+  return `<div class="grupo-inf"><h3>${titulo}</h3><table><thead><tr><th></th><th class="num">Veces</th><th class="num">Uds.</th><th class="num">Importe</th></tr></thead><tbody>
+    ${filas.map(f => `<tr><td>${esc(etiqueta(f.clave))}</td><td class="num">${f.veces}</td><td class="num">${uds(f.unidades)}</td><td class="num">${euros(f.importe)}</td></tr>`).join('')
+      || '<tr><td colspan="4" class="vacio">Nada</td></tr>'}
+  </tbody></table></div>`;
+}
+
+async function pintarBorrados(desde = E.infDesde ?? hoyLocal(), hasta = E.infHasta ?? hoyLocal()) {
+  E.infDesde = desde; E.infHasta = hasta;
+  const r = await api('GET', `/informes/borrados?desde=${desde}&hasta=${hasta}`);
+  const t = r.totales;
+  $('#vista').innerHTML = `<div class="informe scroll">
+    ${cabeceraConfig('Informe de borrados')}
+    <div class="filtros">
+      <label>Desde <input type="date" id="f-desde" value="${desde}"></label>
+      <label>Hasta <input type="date" id="f-hasta" value="${hasta}"></label>
+      <button data-rango="hoy">Hoy</button><button data-rango="7">7 días</button><button data-rango="30">30 días</button>
+    </div>
+    <div class="cifras">
+      <div class="cifra"><small>Importe borrado</small><b>${euros(t.importe)}</b></div>
+      <div class="cifra"><small>Líneas borradas</small><b>${t.lineas}</b></div>
+      <div class="cifra"><small>Unidades</small><b>${uds(t.unidades)}</b></div>
+      <div class="cifra"><small>Cuentas borradas enteras</small><b>${t.cuentas}</b></div>
+    </div>
+    <div class="grupos-inf">
+      ${tablaGrupo('Por operario', r.por_operario)}
+      ${tablaGrupo('Por fecha', r.por_dia, d => d.split('-').reverse().join('/'))}
+      ${tablaGrupo('Por hora', r.por_hora, h => `${h}:00 a ${h}:59`)}
+      ${tablaGrupo('Por familia', r.por_familia)}
+      ${tablaGrupo('Por artículo', r.por_articulo)}
+    </div>
+    <h3>Detalle</h3>
+    <section class="panel"><table><thead><tr><th>Fecha y hora</th><th>Operario</th><th>Cuenta</th><th>Tipo</th><th>Artículo</th><th class="num">Uds.</th><th class="num">Importe</th></tr></thead><tbody>
+      ${r.detalle.map(b => `<tr><td>${esc(b.fecha.slice(8, 10) + '/' + b.fecha.slice(5, 7) + ' ' + b.fecha.slice(11, 16))}</td><td>${esc(b.operario || 'Sin operario')}</td>
+        <td>${esc(b.cuenta)}</td><td>${b.tipo === 'cuenta' ? 'Borrar todo' : 'Línea'}</td><td>${esc(b.descripcion)}</td>
+        <td class="num">${uds(b.unidades)}</td><td class="num">${euros(b.importe)}</td></tr>`).join('') || '<tr><td colspan="7" class="vacio">No se ha borrado nada en estas fechas</td></tr>'}
+    </tbody></table></section>
+  </div>`;
+  $('#vista').onchange = e => { if (e.target.type === 'date') intentar(() => pintarBorrados($('#f-desde').value, $('#f-hasta').value)); };
+  $('#vista').onclick = e => intentar(async () => {
+    if (e.target.closest('[data-volver]')) return ir('config');
+    const b = e.target.closest('[data-rango]');
+    if (!b) return;
+    const hoy = hoyLocal();
+    if (b.dataset.rango === 'hoy') return pintarBorrados(hoy, hoy);
+    const d = new Date(Date.now() - (Number(b.dataset.rango) - 1) * 86400000);
+    return pintarBorrados(new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10), hoy);
+  });
+}
+
+async function pintarRegistro(fecha = E.regFecha ?? hoyLocal(), q = E.regTexto ?? '', nivel = E.regNivel ?? '') {
+  E.regFecha = fecha; E.regTexto = q; E.regNivel = nivel;
+  const filas = await api('GET', `/registro?fecha=${fecha}&q=${encodeURIComponent(q)}&nivel=${nivel}`);
+  $('#vista').innerHTML = `<div class="informe scroll">
+    ${cabeceraConfig('Registro de actividad')}
+    <div class="filtros">
+      <label>Día <input type="date" id="r-fecha" value="${fecha}"></label>
+      <label>Buscar <input id="r-texto" value="${esc(q)}" placeholder="cobrar, borrar, mesa..."></label>
+      <label>Tipo <select id="r-nivel">${[['', 'Todo'], ['info', 'Acciones'], ['aviso', 'Avisos'], ['error', 'Errores']]
+        .map(([v, t]) => `<option value="${v}" ${v === nivel ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    </div>
+    <p class="nota">También se guarda un fichero por día en la carpeta <b>datos\\registro</b> del TPV.</p>
+    <section class="panel"><table><thead><tr><th>Hora</th><th>Tipo</th><th>Acción</th><th>Desde</th><th>Datos</th></tr></thead><tbody>
+      ${filas.map(f => `<tr class="nivel-${esc(f.nivel)}"><td>${esc(f.fecha.slice(11, 19))}</td><td>${f.nivel === 'info' ? 'Acción' : f.nivel === 'aviso' ? 'Aviso' : 'Error'}</td>
+        <td>${esc(f.accion)}<br><small>${esc(f.metodo)} ${esc(f.ruta)}</small></td><td>${esc(f.origen)}</td><td class="datos">${esc(f.datos)}</td></tr>`).join('')
+        || '<tr><td colspan="5" class="vacio">Sin actividad ese día</td></tr>'}
+    </tbody></table></section>
+  </div>`;
+  const recargar = () => intentar(() => pintarRegistro($('#r-fecha').value, $('#r-texto').value, $('#r-nivel').value));
+  $('#vista').onchange = e => { if (e.target.id !== 'r-texto') recargar(); };
+  $('#r-texto').onkeydown = e => { if (e.key === 'Enter') recargar(); };
+  $('#vista').onclick = e => { if (e.target.closest('[data-volver]')) ir('config'); };
 }
 
 // ---------- Tiempo real y arranque ----------
