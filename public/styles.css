@@ -34,6 +34,8 @@ input, select { font: inherit; padding: 8px 10px; border: 1px solid var(--borde)
 .menu { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
 .menu button { background: transparent; color: #fff; border-color: transparent; padding: 8px 14px; white-space: nowrap; }
 .menu button.activo { background: var(--marca); color: #fff; font-weight: 600; }
+.menu .contador { display: inline-block; min-width: 22px; padding: 1px 7px; margin-left: 4px; border-radius: 999px; background: #f59e0b; color: #0b1527; font-weight: 700; font-size: 13px; text-align: center; }
+.titulo-vista { margin: 0 0 8px; font-size: 20px; }
 .estado { display: flex; align-items: center; gap: 10px; font-size: 14px; white-space: nowrap; }
 .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--peligro); display: inline-block; }
 .punto.ok { background: #3ccf6e; }

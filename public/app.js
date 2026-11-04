@@ -92,6 +92,8 @@ const zonaBarra = () => E.datos.zonas.find(z => z.tipo === 'barra') ?? E.datos.z
 
 async function cargarAbiertas() {
   E.abiertas = await api('GET', '/cuentas');
+  const n = $('#n-abiertas');
+  if (n) { n.textContent = E.abiertas.length || ''; n.classList.toggle('oculto', !E.abiertas.length); }
 }
 
 function nombreCuenta(c) {
@@ -751,9 +753,6 @@ function cabeceraConfig(titulo) {
 }
 
 const SECCIONES_CONFIG = [
-  ['Uso diario', [
-    ['abiertas', 'Cuentas abiertas', 'Ver y recuperar las cuentas sin cobrar'],
-  ]],
   ['Informes', [
     ['informes', 'Ventas y caja', 'Ventas por forma de cobro y por familia'],
     ['borrados', 'Borrados', 'Líneas y cuentas borradas por operario, hora, familia y artículo'],
@@ -804,13 +803,12 @@ function pintarConfig() {
 async function pintarAbiertas() {
   await cargarAbiertas();
   $('#vista').innerHTML = `<div class="mesas">
-    ${cabeceraConfig(`Cuentas abiertas (${E.abiertas.length})`)}
+    <h2 class="titulo-vista">Cuentas abiertas (${E.abiertas.length})</h2>
     <div class="plano"><div class="lista-barra">
       ${E.abiertas.map(a => `<button data-abrir="${a.id}"><b>${esc(nombreCuenta(a))}</b><br>${euros(a.total)}<br><small>${hora(a.abierta_en)}</small></button>`).join('')}
       ${E.abiertas.length ? '' : '<div class="vacio">No hay cuentas abiertas</div>'}
     </div></div></div>`;
   $('#vista').onclick = e => intentar(async () => {
-    if (e.target.closest('[data-volver]')) return ir('config');
     const b = e.target.closest('[data-abrir]');
     if (!b) return;
     E.cuenta = { id: Number(b.dataset.abrir) };
@@ -907,6 +905,7 @@ function conectarEventos() {
     clearTimeout(t);
     t = setTimeout(() => intentar(async () => {
       if (tipo === 'gestion' || tipo === 'empresa') await cargarDatos();
+      if (!['venta', 'mesas', 'abiertas'].includes(E.vista)) await cargarAbiertas();
       if (!$('#modal').classList.contains('oculto')) return;
       if (['venta', 'mesas', 'abiertas'].includes(E.vista)) await VISTAS[E.vista]();
     }), 250);
