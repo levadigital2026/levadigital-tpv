@@ -79,7 +79,7 @@ function nombreCuenta(c) {
 }
 
 // ---------- Navegación ----------
-const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: pintarGestion };
+const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa };
 function ir(vista) {
   E.vista = vista;
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
@@ -126,7 +126,7 @@ async function pintarVenta() {
       </div>
       <div class="acciones">
         ${E.datos.botones.filter(b => b.visible).map(b => `<button data-accion="${esc(b.accion)}" ${b.color ? `class="color" style="--bc:${esc(b.color)}"` : ''}
-          ${accionActiva(b.accion, c) ? '' : 'disabled'}>${esc(b.texto)}</button>`).join('')}
+          ${accionActiva(b.accion, c) ? '' : 'disabled'} title="${esc(b.texto)}">${b.accion === 'configuracion' ? ICONO_HERRAMIENTAS : esc(b.texto)}</button>`).join('')}
       </div>
       <div class="fila-cobrar"><button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}>Cobrar ${c?.lineas.length ? euros(c.total) : ''}</button></div>
     </section>
@@ -138,10 +138,6 @@ async function pintarVenta() {
       ${subfamilias.map(f => `<button data-familia="${f.id}" style="--c:${esc(f.color)}"><b>${esc(f.nombre)}</b><span>Subfamilia</span></button>`).join('')}
       ${arts.map(a => `<button data-articulo="${a.id}" style="--c:${esc(colorDe(a.familia_id))}"><b>${esc(a.nombre)}</b><span>${euros(a.precio)}</span></button>`).join('')}
       ${!arts.length && !subfamilias.length ? '<div class="vacio">Esta familia no tiene artículos</div>' : ''}
-    </section>
-    <section class="panel abiertas">
-      <h3>Cuentas abiertas (${E.abiertas.length})</h3>
-      ${E.abiertas.map(a => `<button data-cuenta="${a.id}" class="${a.id === c?.id ? 'actual' : ''}"><span>${esc(nombreCuenta(a))}</span><b>${euros(a.total)}</b></button>`).join('')}
     </section>
   </div>`;
 }
@@ -174,6 +170,8 @@ async function tecla(k) {
   }
   $('#calc').textContent = E.calc;
 }
+
+const ICONO_HERRAMIENTAS = `<svg viewBox="0 0 24 24" width="22" height="22" aria-label="Configuración" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>`;
 
 // Botonera configurable: qué hace cada acción y cuándo está disponible.
 function accionActiva(accion, c) {
@@ -209,6 +207,7 @@ async function accion(a) {
     case 'preticket': return verPreticket();
     case 'nueva': E.cuenta = null; E.lineaSel = null; return pintarVenta();
     case 'mesas': return ir('mesas');
+    case 'configuracion': return ir('config');
     case 'borrar_linea': return borrarLinea(E.lineaSel);
     case 'borrar_todo':
       if (!confirm('¿Borrar todas las líneas de la cuenta?')) return;
@@ -540,20 +539,27 @@ const GESTION = {
   mesas: { titulo: 'Mesas', campos: [['nombre', 'Nombre'], ['zona_id', 'Zona', 'zonas'], ['x', 'Columna', 'num'], ['y', 'Fila', 'num']] },
   formas_cobro: { titulo: 'Formas de cobro', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipocobro'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   operarios: { titulo: 'Operarios', campos: [['nombre', 'Nombre'], ['pin', 'PIN']] },
+  ivas: { titulo: 'IVAs', campos: [['nombre', 'Nombre'], ['codigo', 'Código'], ['porcentaje', 'IVA %', 'num'], ['recargo', 'Recargo equivalencia %', 'num'], ['orden', 'Orden', 'num']] },
+  puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['orden', 'Orden', 'num']] },
+  impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
+  conceptos_pago: { titulo: 'Conceptos de pago', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
   botones: { titulo: 'Botonera', campos: [['texto', 'Texto'], ['accion', 'Acción', 'accion'], ['color', 'Color', 'colorop'], ['orden', 'Orden', 'num'], ['visible', 'Visible', 'bool']] },
 };
 const GRUPOS = [[-2, 'Ninguno'], [0, 'Entrantes'], [1, 'Primeros'], [2, 'Segundos'], [3, 'Postres']];
 const OPCIONES = {
   tipozona: [['mesas', 'Mesas'], ['barra', 'Barra']],
   tipocobro: [['efectivo', 'Efectivo'], ['tarjeta', 'Tarjeta'], ['pendiente', 'Pendiente de cobro'], ['otro', 'Otro']],
+  tipopuesto: [['tpv', 'TPV'], ['pda', 'PDA camarero'], ['kds', 'Pantalla de cocina']],
+  usoimpresora: [['cocina', 'Cocina'], ['barra', 'Barra'], ['tickets', 'Tickets'], ['otro', 'Otro']],
 };
+const REFS = ['familias', 'departamentos', 'zonas', 'impresoras'];
 
 function valorCelda(tipo, v) {
   if (tipo === 'euros') return euros(v);
   if (tipo === 'bool') return v ? 'Sí' : 'No';
   if (tipo === 'grupo') return GRUPOS.find(g => g[0] === v)?.[1] ?? '';
   if (OPCIONES[tipo]) return OPCIONES[tipo].find(o => o[0] === v)?.[1] ?? v;
-  if (['familias', 'departamentos', 'zonas'].includes(tipo)) return E.datos[tipo].find(x => x.id === v)?.nombre ?? '';
+  if (REFS.includes(tipo)) return E.datos[tipo].find(x => x.id === v)?.nombre ?? '';
   if (tipo === 'accion') return esc(E.datos.acciones[v] ?? v);
   if (tipo === 'colorop') return v ? `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>` : 'Normal';
   if (tipo === 'color') return `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>`;
@@ -565,7 +571,7 @@ function campoForm([k, etiqueta, tipo], fila) {
   if (tipo === 'bool') return `<label><span>${etiqueta}</span><select name="${k}"><option value="1" ${v !== 0 ? 'selected' : ''}>Sí</option><option value="0" ${v === 0 ? 'selected' : ''}>No</option></select></label>`;
   if (tipo === 'colorop') return `<label>${etiqueta}<span style="display:flex;gap:8px;align-items:center"><input type="color" name="${k}" value="${esc(v || '#0064fc')}" ${v ? '' : 'disabled'}>
     <label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" name="${k}_normal" ${v ? '' : 'checked'} onchange="this.form.elements['${k}'].disabled=this.checked"> Sin color</label></span></label>`;
-  const opts = tipo === 'accion' ? Object.entries(E.datos.acciones) : tipo === 'grupo' ? GRUPOS : OPCIONES[tipo] ?? (['familias', 'departamentos', 'zonas'].includes(tipo) ? [['', '—'], ...E.datos[tipo].map(x => [x.id, x.nombre])] : null);
+  const opts = tipo === 'accion' ? Object.entries(E.datos.acciones) : tipo === 'grupo' ? GRUPOS : OPCIONES[tipo] ?? (REFS.includes(tipo) ? [['', '—'], ...E.datos[tipo].map(x => [x.id, x.nombre])] : null);
   if (opts) return `<label>${etiqueta}<select name="${k}">${opts.map(([val, txt]) => `<option value="${esc(val)}" ${String(val) === String(v ?? '') ? 'selected' : ''}>${esc(txt)}</option>`).join('')}</select></label>`;
   if (tipo === 'color') return `<label>${etiqueta}<input type="color" name="${k}" value="${esc(v ?? '#3d5a80')}"></label>`;
   if (tipo === 'euros') return `<label>${etiqueta}<input name="${k}" inputmode="decimal" value="${v !== undefined ? (v / 100).toFixed(2).replace('.', ',') : ''}"></label>`;
@@ -577,8 +583,7 @@ async function pintarGestion(editar) {
   const filas = await api('GET', `/gestion/${E.tablaGestion}`);
   const fila = editar === 'nuevo' ? {} : filas.find(f => f.id === editar);
   $('#vista').innerHTML = `<div class="mesas">
-    <div class="pestanas">${Object.entries(GESTION).map(([k, d]) => `<button data-tabla="${k}" class="${k === E.tablaGestion ? 'activa' : ''}">${d.titulo}</button>`).join('')}
-      <button data-tabla="empresa" class="${E.tablaGestion === 'empresa' ? 'activa' : ''}">Empresa</button></div>
+    ${cabeceraConfig(def.titulo)}
     <div class="dos-col" style="padding:0;flex:1;min-height:0">
       <section class="panel scroll">
         <div class="botones"><button class="primario" data-editar="nuevo">+ Añadir</button></div>
@@ -596,12 +601,9 @@ async function pintarGestion(editar) {
     </div></div>`;
 
   $('#vista').onclick = e => intentar(async () => {
-    const b = e.target.closest('[data-tabla],[data-editar],#b-borrar');
+    const b = e.target.closest('[data-volver],[data-editar],#b-borrar');
     if (!b) return;
-    if (b.dataset.tabla) {
-      E.tablaGestion = b.dataset.tabla;
-      return E.tablaGestion === 'empresa' ? pintarEmpresa() : pintarGestion();
-    }
+    if (b.dataset.volver) return ir('config');
     if (b.dataset.editar) return pintarGestion(b.dataset.editar === 'nuevo' ? 'nuevo' : Number(b.dataset.editar));
     if (b.id === 'b-borrar') {
       if (!confirm('¿Borrar este registro?')) return;
@@ -620,7 +622,7 @@ async function pintarGestion(editar) {
       if (tipo === 'euros') datos[k] = Math.round(Number(v.replace(',', '.')) * 100);
       else if (tipo === 'colorop') datos[k] = form.elements[k + '_normal'].checked ? '' : v;
       else if (['num', 'grupo', 'bool'].includes(tipo)) datos[k] = Number(String(v).replace(',', '.'));
-      else if (['familias', 'departamentos', 'zonas'].includes(tipo)) datos[k] = v === '' ? null : Number(v);
+      else if (REFS.includes(tipo)) datos[k] = v === '' ? null : Number(v);
       else datos[k] = v;
     }
     const r = editar === 'nuevo'
@@ -636,16 +638,13 @@ async function pintarEmpresa() {
   const emp = await api('GET', '/empresa');
   const campos = [['nombre', 'Nombre comercial'], ['nif', 'NIF'], ['direccion', 'Dirección'], ['serie_tickets', 'Serie de tickets']];
   $('#vista').innerHTML = `<div class="mesas">
-    <div class="pestanas">${Object.entries(GESTION).map(([k, d]) => `<button data-tabla="${k}">${d.titulo}</button>`).join('')}<button data-tabla="empresa" class="activa">Empresa</button></div>
+    ${cabeceraConfig('Datos de empresa')}
     <section class="panel" style="max-width:520px"><form class="form" id="f-empresa">
       ${campos.map(([k, t]) => `<label>${t}<input name="${k}" value="${esc(emp[k])}"></label>`).join('')}
       <div class="botones" style="padding:0"><button class="primario" type="submit">Guardar</button></div>
     </form></section></div>`;
   $('#vista').onclick = e => intentar(async () => {
-    const b = e.target.closest('[data-tabla]');
-    if (!b) return;
-    E.tablaGestion = b.dataset.tabla;
-    return E.tablaGestion === 'empresa' ? pintarEmpresa() : pintarGestion();
+    if (e.target.closest('[data-volver]')) return ir('config');
   });
   $('#f-empresa').onsubmit = e => intentar(async () => {
     e.preventDefault();
@@ -653,6 +652,75 @@ async function pintarEmpresa() {
     await api('PUT', '/empresa', Object.fromEntries(campos.map(([k]) => [k, f.elements[k].value])));
     await cargarDatos();
     aviso('Datos de empresa guardados');
+  });
+}
+
+// ---------- Configuración ----------
+function cabeceraConfig(titulo) {
+  return `<div class="cab-config"><button data-volver="1">← Configuración</button><h2>${esc(titulo)}</h2></div>`;
+}
+
+const SECCIONES_CONFIG = [
+  ['Uso diario', [
+    ['abiertas', 'Cuentas abiertas', 'Ver y recuperar las cuentas sin cobrar'],
+    ['informes', 'Informes', 'Ventas por forma de cobro y por familia'],
+  ]],
+  ['Carta', [
+    ['articulos', 'Artículos', 'Precios, IVA y familia'],
+    ['familias', 'Familias', 'Colores, orden y subfamilias'],
+    ['departamentos', 'Departamentos', 'Agrupan familias (barra, cocina...)'],
+  ]],
+  ['Local', [
+    ['zonas', 'Zonas', 'Barra, comedor, terraza...'],
+    ['mesas', 'Mesas', 'Mesas de cada zona'],
+    ['puestos', 'Puestos', 'TPV, PDA y pantallas de cocina'],
+    ['impresoras', 'Impresoras', 'Tickets, cocina y barra'],
+    ['operarios', 'Operarios', 'Camareros y claves'],
+  ]],
+  ['Cobros e impuestos', [
+    ['formas_cobro', 'Formas de pago', 'Efectivo, tarjeta, pendiente...'],
+    ['ivas', 'IVAs', 'Tipos de IVA y recargo'],
+    ['conceptos_pago', 'Conceptos de pago', 'Entradas y salidas de caja'],
+  ]],
+  ['Personalización', [
+    ['empresa', 'Datos de empresa', 'Nombre, NIF, dirección y serie'],
+    ['botones', 'Botonera', 'Botones de la pantalla de venta'],
+  ]],
+];
+
+function pintarConfig() {
+  $('#vista').innerHTML = `<div class="config scroll">
+    <h2>${ICONO_HERRAMIENTAS} Configuración</h2>
+    ${SECCIONES_CONFIG.map(([titulo, items]) => `<h3>${titulo}</h3><div class="baldosas">
+      ${items.map(([k, t, d]) => `<button data-ir="${k}"><b>${t}</b><span>${d}</span></button>`).join('')}
+    </div>`).join('')}
+  </div>`;
+  $('#vista').onclick = e => intentar(async () => {
+    const b = e.target.closest('[data-ir]');
+    if (!b) return;
+    const k = b.dataset.ir;
+    if (k === 'abiertas' || k === 'empresa') return ir(k);
+    if (k === 'informes') return ir('caja');
+    E.tablaGestion = k;
+    return ir('gestion');
+  });
+}
+
+async function pintarAbiertas() {
+  await cargarAbiertas();
+  $('#vista').innerHTML = `<div class="mesas">
+    ${cabeceraConfig(`Cuentas abiertas (${E.abiertas.length})`)}
+    <div class="plano"><div class="lista-barra">
+      ${E.abiertas.map(a => `<button data-abrir="${a.id}"><b>${esc(nombreCuenta(a))}</b><br>${euros(a.total)}<br><small>${hora(a.abierta_en)}</small></button>`).join('')}
+      ${E.abiertas.length ? '' : '<div class="vacio">No hay cuentas abiertas</div>'}
+    </div></div></div>`;
+  $('#vista').onclick = e => intentar(async () => {
+    if (e.target.closest('[data-volver]')) return ir('config');
+    const b = e.target.closest('[data-abrir]');
+    if (!b) return;
+    E.cuenta = { id: Number(b.dataset.abrir) };
+    E.lineaSel = null;
+    return ir('venta');
   });
 }
 
@@ -668,7 +736,7 @@ function conectarEventos() {
     t = setTimeout(() => intentar(async () => {
       if (tipo === 'gestion' || tipo === 'empresa') await cargarDatos();
       if (!$('#modal').classList.contains('oculto')) return;
-      if (E.vista === 'venta' || E.vista === 'mesas') await VISTAS[E.vista]();
+      if (['venta', 'mesas', 'abiertas'].includes(E.vista)) await VISTAS[E.vista]();
     }), 250);
   };
 }

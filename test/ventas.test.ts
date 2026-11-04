@@ -138,3 +138,20 @@ test('borrar todas las líneas y botonera configurable', async () => {
     assert.equal((await api('POST', '/gestion/botones', { accion: 'abrir_cajas_fuertes', texto: 'x' })).status, 400);
   } finally { await cerrar(); }
 });
+
+test('configuración: el botón de herramientas no se puede quitar y existen las nuevas tablas', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const conf = ini.botones.find((b: any) => b.accion === 'configuracion');
+    assert.ok(conf);
+    assert.equal((await api('PUT', `/gestion/botones/${conf.id}`, { visible: false })).status, 400);
+    assert.equal((await api('DELETE', `/gestion/botones/${conf.id}`)).status, 400);
+    assert.equal((await api('PUT', `/gestion/botones/${conf.id}`, { color: '#000000' })).status, 200);
+    assert.equal((await api('GET', '/gestion/ivas')).data.length, 3);
+    assert.equal((await api('GET', '/gestion/puestos')).data.length, 1);
+    assert.ok((await api('GET', '/gestion/conceptos_pago')).data.length > 0);
+    const imp = (await api('POST', '/gestion/impresoras', { nombre: 'Cocina', ip: '192.168.1.50', uso: 'cocina' })).data;
+    assert.equal(imp.puerto, 9100);
+  } finally { await cerrar(); }
+});

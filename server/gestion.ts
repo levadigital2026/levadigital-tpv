@@ -22,6 +22,20 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
   },
   operarios: { nombre: { tipo: 'texto', obligatorio: true }, pin: { tipo: 'texto' } },
+  ivas: {
+    nombre: { tipo: 'texto', obligatorio: true }, codigo: { tipo: 'texto' }, porcentaje: { tipo: 'decimal', obligatorio: true },
+    recargo: { tipo: 'decimal' }, orden: { tipo: 'entero' },
+  },
+  puestos: {
+    nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['tpv', 'pda', 'kds'] },
+    impresora_tickets_id: { tipo: 'ref' }, orden: { tipo: 'entero' },
+  },
+  impresoras: {
+    nombre: { tipo: 'texto', obligatorio: true }, ip: { tipo: 'texto' }, puerto: { tipo: 'entero' },
+    uso: { tipo: 'texto', valores: ['tickets', 'cocina', 'barra', 'otro'] }, departamento_id: { tipo: 'ref' },
+    activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
+  },
+  conceptos_pago: { nombre: { tipo: 'texto', obligatorio: true }, orden: { tipo: 'entero' } },
   botones: {
     accion: { tipo: 'texto', obligatorio: true, valores: Object.keys(ACCIONES) }, texto: { tipo: 'texto', obligatorio: true },
     color: { tipo: 'texto' }, orden: { tipo: 'entero' }, visible: { tipo: 'bool' },
@@ -94,9 +108,20 @@ export function crear(db: DB, tabla: string, datos: Record<string, unknown>) {
   return db.prepare(`SELECT * FROM ${tabla} WHERE id = ?`).get(Number(r.lastInsertRowid));
 }
 
+// El botón de configuración es la única entrada a la configuración: no se puede ocultar ni borrar.
+function protegerConfiguracion(db: DB, tabla: string, id: number, v?: Record<string, unknown>) {
+  if (tabla !== 'botones') return;
+  const b = db.prepare('SELECT accion FROM botones WHERE id = ?').get(id) as { accion: string } | undefined;
+  if (b?.accion !== 'configuracion') return;
+  if (!v || v.visible === 0 || (v.accion !== undefined && v.accion !== 'configuracion')) {
+    throw new ErrorTPV('El botón de configuración no se puede quitar, porque es la entrada a la configuración');
+  }
+}
+
 export function actualizar(db: DB, tabla: string, id: number, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, false);
+  protegerConfiguracion(db, tabla, id, v);
   const cols = Object.keys(v);
   if (cols.length) {
     const r = db.prepare(`UPDATE ${tabla} SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE id = ?`).run(...Object.values(v), id);
@@ -109,6 +134,7 @@ export function actualizar(db: DB, tabla: string, id: number, datos: Record<stri
 
 export function borrar(db: DB, tabla: string, id: number) {
   comprobarTabla(tabla);
+  protegerConfiguracion(db, tabla, id);
   if (tabla === 'articulos') {
     // Un artículo ya vendido no se borra: se desactiva para conservar el histórico.
     const usado = db.prepare('SELECT 1 FROM lineas WHERE articulo_id = ? UNION SELECT 1 FROM ticket_lineas WHERE articulo_id = ?').get(id, id);

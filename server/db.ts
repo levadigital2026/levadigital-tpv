@@ -124,6 +124,43 @@ CREATE TABLE IF NOT EXISTS cierres (
   resumen TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ivas (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  codigo TEXT NOT NULL DEFAULT '',
+  porcentaje REAL NOT NULL,
+  recargo REAL NOT NULL DEFAULT 0,
+  orden INTEGER NOT NULL DEFAULT 0
+);
+
+-- Cada dispositivo que trabaja con el TPV: TPV, PDA o pantalla de cocina.
+CREATE TABLE IF NOT EXISTS puestos (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  tipo TEXT NOT NULL DEFAULT 'tpv' CHECK (tipo IN ('tpv', 'pda', 'kds')),
+  impresora_tickets_id INTEGER REFERENCES impresoras(id) ON DELETE SET NULL,
+  orden INTEGER NOT NULL DEFAULT 0
+);
+
+-- Impresoras de red (tickets, cocina, barra). La impresión se conecta en el paso 3.
+CREATE TABLE IF NOT EXISTS impresoras (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  ip TEXT NOT NULL DEFAULT '',
+  puerto INTEGER NOT NULL DEFAULT 9100,
+  uso TEXT NOT NULL DEFAULT 'cocina' CHECK (uso IN ('tickets', 'cocina', 'barra', 'otro')),
+  departamento_id INTEGER REFERENCES departamentos(id) ON DELETE SET NULL,
+  activa INTEGER NOT NULL DEFAULT 1,
+  orden INTEGER NOT NULL DEFAULT 0
+);
+
+-- Conceptos predefinidos para las entradas y salidas de dinero de caja.
+CREATE TABLE IF NOT EXISTS conceptos_pago (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  orden INTEGER NOT NULL DEFAULT 0
+);
+
 -- Botonera de funciones de la pantalla de venta (configurable desde Gestión).
 CREATE TABLE IF NOT EXISTS botones (
   id INTEGER PRIMARY KEY,
@@ -150,11 +187,35 @@ export function openDb(file: string): DB {
   if (vacia.n === 0) seed(db);
   const sinBotones = db.prepare('SELECT COUNT(*) AS n FROM botones').get() as { n: number };
   if (sinBotones.n === 0) seedBotones(db);
+  migrar(db);
   return db;
+}
+
+const cuenta = (db: DB, tabla: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${tabla}`).get() as { n: number }).n;
+
+// Añade lo que falte en bases de datos creadas con versiones anteriores.
+function migrar(db: DB) {
+  tx(db, () => {
+    if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'configuracion'").get()) {
+      db.prepare("INSERT INTO botones (accion, texto, color, orden, visible) VALUES ('configuracion', 'Configuración', '#0b1527', 0, 1)").run();
+    }
+    if (cuenta(db, 'ivas') === 0) {
+      const i = db.prepare('INSERT INTO ivas (nombre, codigo, porcentaje, recargo, orden) VALUES (?, ?, ?, ?, ?)');
+      i.run('Superreducido', 'S', 4, 0.5, 1);
+      i.run('Reducido', 'R', 10, 1.4, 2);
+      i.run('General', 'G', 21, 5.2, 3);
+    }
+    if (cuenta(db, 'puestos') === 0) db.prepare("INSERT INTO puestos (nombre, tipo, orden) VALUES ('TPV principal', 'tpv', 1)").run();
+    if (cuenta(db, 'conceptos_pago') === 0) {
+      const c = db.prepare('INSERT INTO conceptos_pago (nombre, orden) VALUES (?, ?)');
+      ['Pago a proveedor', 'Cambio de moneda', 'Retirada de efectivo'].forEach((n, i) => c.run(n, i + 1));
+    }
+  });
 }
 
 // Acciones que puede tener un botón de la botonera.
 export const ACCIONES: Record<string, string> = {
+  configuracion: 'Configuración (herramientas)',
   guardar: 'Guardar cuenta',
   preticket: 'Pre-ticket',
   nueva: 'Nueva cuenta',
