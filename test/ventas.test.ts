@@ -274,7 +274,7 @@ test('ordenar: guarda el orden nuevo de artículos y rechaza tablas sin orden', 
     assert.deepEqual((await api('POST', '/gestion/articulos/ordenar', { ids })).data, { ordenados: ids.length });
     const despues = (await api('GET', '/inicio')).data.articulos.filter((a: any) => a.familia_id === cafe.familia_id).map((a: any) => a.id);
     assert.deepEqual(despues, ids);
-    assert.equal((await api('POST', '/gestion/operarios/ordenar', { ids: [1] })).status, 400);
+    assert.equal((await api('POST', '/gestion/departamentos/ordenar', { ids: [1] })).status, 400);
     assert.equal((await api('POST', '/gestion/botones/ordenar', { ids: [1, 1] })).status, 400);
   } finally { await cerrar(); }
 });
@@ -306,4 +306,88 @@ test('alérgenos e imágenes automáticas', async () => {
     assert.equal(puestas['Rabas'], 'articulos/rabas.bmp');
     assert.ok(auto.sin.includes('Txakoli'));
   } finally { await cerrar(); }
+});
+
+test('orden de plato, comanda agrupada y marchar', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const nombres = ini.ordenes_plato.map((o: any) => o.nombre);
+    assert.deepEqual(nombres, ['Entrantes', 'Primeros', 'Segundos', 'Postres', 'Bebidas']);
+    const segundos = ini.ordenes_plato.find((o: any) => o.nombre === 'Segundos');
+    const postres = ini.ordenes_plato.find((o: any) => o.nombre === 'Postres');
+    const comedor = ini.zonas.find((z: any) => z.nombre === 'Comedor');
+    const mesa = ini.mesas.find((m: any) => m.zona_id === comedor.id);
+    const tarta = ini.articulos.find((a: any) => a.nombre === 'Tarta de queso');
+    const rabas = ini.articulos.find((a: any) => a.nombre === 'Rabas');
+    const cana = ini.articulos.find((a: any) => a.nombre === 'Caña');
+    assert.equal(tarta.orden_plato_id, postres.id); // migrado desde el antiguo grupo de cocina
+
+    const c = (await api('POST', '/cuentas', { zona_id: comedor.id, mesa_id: mesa.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: tarta.id });
+    let cu = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: rabas.id })).data;
+    cu = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: cana.id })).data;
+    const lRabas = cu.lineas.find((l: any) => l.descripcion === 'Rabas');
+    cu = (await api('POST', `/cuentas/${c.id}/orden_plato`, { orden_plato_id: segundos.id, lineas: [lRabas.id] })).data;
+    assert.equal(cu.lineas.find((l: any) => l.id === lRabas.id).orden_plato_id, segundos.id);
+
+    const com = (await api('GET', `/cuentas/${c.id}/comanda`)).data;
+    assert.deepEqual(com.grupos.map((g: any) => g.nombre), ['Segundos', 'Postres', 'Sin orden']);
+    assert.match(com.cuenta, /de Comedor$/);
+    const m = (await api('POST', `/cuentas/${c.id}/marchar`, { orden_plato_id: segundos.id })).data;
+    assert.match(m.texto, /^MARCHAR Segundos · .* de Comedor$/);
+    assert.equal((await api('GET', '/cocina/marchas')).data.length, 1);
+  } finally { await cerrar(); }
+});
+
+test('operarios: clave, RFID, permisos por puesto y control de empleados', async () => {
+  const { db, cerrar } = await arrancar();
+  const srv = crearServidor(db);
+  await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/api`;
+  const api = async (metodo: string, ruta: string, cuerpo?: unknown, cab: Record<string, string> = {}) => {
+    const r = await fetch(base + ruta, { method: metodo, headers: { ...(cuerpo ? { 'content-type': 'application/json' } : {}), ...cab }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+    return { status: r.status, data: await r.json() as any };
+  };
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const encargado = ini.operarios.find((o: any) => o.nombre === 'Encargado');
+    assert.ok(encargado.con_clave);
+    assert.ok(!('pin' in encargado));
+    assert.ok(encargado.permisos.includes('configuracion'));
+    const ana = (await api('POST', '/gestion/operarios', { nombre: 'Ana', rfid: 'AB12CD', permisos: 'cobrar' })).data;
+    assert.equal((await api('POST', '/gestion/operarios', { nombre: 'Otro', rfid: 'AB12CD' })).status, 400);
+
+    assert.equal((await api('POST', '/operarios/entrar', { operario_id: encargado.id, clave: '0000' })).status, 400);
+    assert.equal((await api('POST', '/operarios/entrar', { operario_id: encargado.id, clave: '1234' })).data.nombre, 'Encargado');
+    assert.equal((await api('POST', '/operarios/entrar', { rfid: 'AB12CD' })).data.nombre, 'Ana');
+
+    const puesto = ini.puestos[0];
+    await api('PUT', `/gestion/puestos/${puesto.id}`, { usar_permisos: true });
+    const comoAna = { 'x-operario': String(ana.id), 'x-puesto': String(puesto.id) };
+    const comoJefe = { 'x-operario': String(encargado.id), 'x-puesto': String(puesto.id) };
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const tarjeta = ini.formas_cobro.find((f: any) => f.tipo === 'tarjeta');
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id }, comoAna)).data;
+    let cu = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[0].id, unidades: 2 }, comoAna)).data;
+    cu = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[1].id }, comoAna)).data;
+    // Ana no puede borrar líneas ni entrar en configuración; sin operario tampoco se puede cobrar.
+    const r1 = await api('DELETE', `/lineas/${cu.lineas[1].id}`, undefined, comoAna);
+    assert.equal(r1.status, 403);
+    assert.match(r1.data.error, /Borrar líneas/);
+    assert.equal((await api('PUT', `/gestion/puestos/${puesto.id}`, { nombre: 'x' }, comoAna)).status, 403);
+    assert.equal((await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: tarjeta.id }, { 'x-puesto': String(puesto.id) })).status, 403);
+    assert.equal((await api('DELETE', `/lineas/${cu.lineas[1].id}`, undefined, comoJefe)).status, 200);
+    const t = (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: tarjeta.id }, comoAna)).data;
+    assert.equal(t.operario_id, ana.id);
+
+    const inf = (await api('GET', '/informes/empleados', undefined, comoJefe)).data;
+    const filaAna = inf.empleados.find((e: any) => e.nombre === 'Ana');
+    const filaJefe = inf.empleados.find((e: any) => e.nombre === 'Encargado');
+    assert.equal(filaAna.tickets, 1);
+    assert.equal(filaAna.unidades, 2);
+    assert.equal(filaJefe.lineas_borradas, 1);
+    assert.ok(inf.actividad.some((a: any) => a.operario === 'Ana' && a.accion === 'Cobrar cuenta'));
+    assert.equal((await api('GET', '/informes/empleados', undefined, comoAna)).status, 403);
+  } finally { await new Promise(r => srv.close(r)); await cerrar(); }
 });

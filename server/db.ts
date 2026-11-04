@@ -195,6 +195,29 @@ CREATE TABLE IF NOT EXISTS registro (
 );
 CREATE INDEX IF NOT EXISTS registro_fecha ON registro (fecha);
 
+-- Órdenes de plato de la comanda (Primeros, Segundos, Postres... o menú degustación).
+CREATE TABLE IF NOT EXISTS ordenes_plato (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  orden INTEGER NOT NULL DEFAULT 0
+);
+
+-- "Marchar": avisos a cocina para que empiece un orden de plato de una mesa.
+CREATE TABLE IF NOT EXISTS marchas (
+  id INTEGER PRIMARY KEY,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  cuenta_id INTEGER,
+  cuenta TEXT NOT NULL DEFAULT '',
+  orden_plato_id INTEGER,
+  orden_plato TEXT NOT NULL DEFAULT '',
+  texto TEXT NOT NULL,
+  operario_id INTEGER,
+  operario TEXT NOT NULL DEFAULT ''
+);
+
+-- Cambios de una sola vez ya aplicados (para no repetirlos al arrancar).
+CREATE TABLE IF NOT EXISTS migraciones (nombre TEXT PRIMARY KEY);
+
 -- Comentarios predefinidos para la comanda (con hielo, sin azúcar...).
 -- Sin familia ni artículo valen para todo; si no, solo para esa familia o ese artículo.
 CREATE TABLE IF NOT EXISTS comentarios (
@@ -254,7 +277,47 @@ function migrar(db: DB) {
   }
   // Alérgenos del artículo: códigos separados por comas (gluten,leche...).
   anadirColumna(db, 'articulos', 'alergenos', "TEXT NOT NULL DEFAULT ''");
+  // Orden de plato del artículo (por defecto) y de cada línea de la cuenta.
+  anadirColumna(db, 'articulos', 'orden_plato_id', 'INTEGER REFERENCES ordenes_plato(id) ON DELETE SET NULL');
+  anadirColumna(db, 'lineas', 'orden_plato_id', 'INTEGER REFERENCES ordenes_plato(id) ON DELETE SET NULL');
+  // Operarios: pulsera RFID y permisos. Puestos: control de permisos y pedir operario en cada operación.
+  anadirColumna(db, 'operarios', 'rfid', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'operarios', 'permisos', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'operarios', 'orden', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'puestos', 'usar_permisos', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'puestos', 'pedir_operario', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'tickets', 'operario_id', 'INTEGER');
+  anadirColumna(db, 'registro', 'operario_id', 'INTEGER');
+  anadirColumna(db, 'registro', 'operario', "TEXT NOT NULL DEFAULT ''");
+  const unaVez = (nombre: string, fn: () => void) => {
+    if (db.prepare('SELECT 1 FROM migraciones WHERE nombre = ?').get(nombre)) return;
+    fn();
+    db.prepare('INSERT INTO migraciones (nombre) VALUES (?)').run(nombre);
+  };
   tx(db, () => {
+    unaVez('ordenes_plato', () => {
+      if (cuenta(db, 'ordenes_plato') > 0) return;
+      const ins = db.prepare('INSERT INTO ordenes_plato (nombre, orden) VALUES (?, ?)');
+      const ids: Record<number, number> = {};
+      ([[0, 'Entrantes'], [1, 'Primeros'], [2, 'Segundos'], [3, 'Postres']] as [number, string][]).forEach(([g, n], i) => {
+        ids[g] = Number(ins.run(n, i + 1).lastInsertRowid);
+      });
+      ins.run('Bebidas', 5);
+      for (const [g, id] of Object.entries(ids)) {
+        db.prepare('UPDATE articulos SET orden_plato_id = ? WHERE grupo_cocina = ?').run(id, Number(g));
+        db.prepare('UPDATE lineas SET orden_plato_id = ? WHERE grupo_cocina = ?').run(id, Number(g));
+      }
+    });
+    // Los operarios que ya existían conservan todos los permisos para que nadie se quede fuera.
+    unaVez('permisos_operarios', () => {
+      db.prepare('UPDATE operarios SET permisos = ?').run(Object.keys(PERMISOS).join(','));
+    });
+    unaVez('botones_comanda_operario', () => {
+      const max = (db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM botones').get() as { m: number }).m;
+      const b = db.prepare('INSERT INTO botones (accion, texto, color, orden, visible) VALUES (?, ?, ?, ?, 1)');
+      [['orden_plato', 'Orden de comanda', '#7c3aed'], ['marchar', 'Marchar cocina', '#e85d04'], ['comanda', 'Ver comanda', ''], ['cambio_operario', 'Cambio de operario', '#0b1527']]
+        .forEach(([a, t, c], i) => { if (!db.prepare('SELECT 1 FROM botones WHERE accion = ?').get(a)) b.run(a, t, c, max + i + 1); });
+    });
     if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'configuracion'").get()) {
       db.prepare("INSERT INTO botones (accion, texto, color, orden, visible) VALUES ('configuracion', 'Configuración', '#0b1527', 0, 1)").run();
     }
@@ -295,6 +358,20 @@ export const ACCIONES: Record<string, string> = {
   efectivo_exacto: 'Cobro rápido en efectivo (importe exacto)',
   tarjeta: 'Cobro rápido con tarjeta',
   ultimo_ticket: 'Ver último ticket',
+  orden_plato: 'Orden de comanda (primeros, segundos...)',
+  marchar: 'Marchar cocina',
+  comanda: 'Ver comanda por orden de plato',
+  cambio_operario: 'Cambio de operario',
+};
+
+// Permisos que se pueden dar a cada operario (se aplican en los puestos con permisos activados).
+export const PERMISOS: Record<string, string> = {
+  cobrar: 'Cobrar',
+  borrar_linea: 'Borrar líneas',
+  borrar_todo: 'Borrar todo y cerrar cuentas',
+  anular_ticket: 'Anular tickets',
+  cierre_caja: 'Cierre de caja',
+  configuracion: 'Entrar en configuración e informes',
 };
 
 function seedBotones(db: DB) {

@@ -8,9 +8,15 @@ const hora = iso => new Date(iso.endsWith('Z') || iso.includes('T') ? iso : iso.
   .toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 async function api(metodo, ruta, cuerpo) {
+  const cab = cuerpo ? { 'content-type': 'application/json' } : {};
+  // Cada petición lleva el operario en uso y el puesto de este dispositivo (permisos y control de empleados).
+  if (typeof E !== 'undefined') {
+    if (E.operario) cab['x-operario'] = String(E.operario.id);
+    if (E.puestoId) cab['x-puesto'] = String(E.puestoId);
+  }
   const r = await fetch('/api' + ruta, {
     method: metodo,
-    headers: cuerpo ? { 'content-type': 'application/json' } : {},
+    headers: cab,
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
   const datos = await r.json().catch(() => ({}));
@@ -38,6 +44,7 @@ function abrirModal(html) {
 function cerrarModal() {
   $('#modal').classList.add('oculto');
   $('#modal-caja').classList.remove('ancho');
+  if (E.pedirTrasModal) { E.pedirTrasModal = false; setTimeout(mostrarPanelOperarios, 0); }
   $('#modal-caja').innerHTML = '';
 }
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') cerrarModal(); });
@@ -64,6 +71,15 @@ async function cargarDatos() {
   }
   $('#local').textContent = E.datos.empresa.nombre;
   aplicarAspecto(E.datos.aspecto);
+  // Puesto de este dispositivo (se elige en Configuración) y operario en uso.
+  let p = null;
+  try { p = Number(localStorage.getItem('puesto')) || null; } catch {}
+  E.puestoId = E.datos.puestos.some(x => x.id === p) ? p : E.datos.puestos[0]?.id ?? null;
+  if (E.operario) {
+    const o = E.datos.operarios.find(x => x.id === E.operario.id);
+    E.operario = o ? { id: o.id, nombre: o.nombre, permisos: o.permisos } : null;
+  }
+  pintarOperarioActual();
   const raices = familiasRaiz();
   const existe = id => E.datos.familias.some(f => f.id === id);
   if (E.nivelFam && !existe(E.nivelFam)) E.nivelFam = null;
@@ -148,7 +164,7 @@ function nombreCuenta(c) {
 }
 
 // ---------- Navegación ----------
-const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto };
+const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados };
 function ir(vista) {
   E.vista = vista;
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
@@ -184,6 +200,7 @@ async function pintarVenta() {
             <div class="linea ${l.id === E.lineaSel ? 'sel' : ''}" data-linea="${l.id}">
               <span class="uds">${uds(l.unidades)}</span><span>${esc(l.descripcion)}</span><span>${euros(Math.round(l.unidades * l.precio))}</span>
               ${l.detalle ? `<span class="det" title="Texto de la comanda">✎ ${esc(l.detalle)}</span>` : ''}
+              ${l.orden_plato_id ? `<span class="op-plato">${esc(E.datos.ordenes_plato.find(o => o.id === l.orden_plato_id)?.nombre ?? '')}</span>` : ''}
             </div>
           </div>`).join('') : '<div class="vacio">Sin artículos</div>'}
       </div>
@@ -246,7 +263,8 @@ function accionActiva(accion, c) {
   const conLineas = !!c?.lineas?.length;
   switch (accion) {
     case 'guardar': case 'comensales': case 'nombre': return !!c;
-    case 'borrar_todo': return !!c;
+    case 'borrar_todo': case 'marchar': return !!c;
+    case 'orden_plato': case 'comanda': return conLineas;
     case 'preticket': case 'efectivo_exacto': case 'tarjeta': return conLineas;
     case 'borrar_linea': case 'detalle': return conLineas && !!E.lineaSel;
     default: return true;
@@ -266,6 +284,7 @@ async function cobroRapido(tipo) {
   E.cuenta = null;
   E.lineaSel = null;
   verTicket(ticket);
+  trasOperacion();
   return pintarVenta();
 }
 
@@ -276,7 +295,13 @@ async function accion(a) {
     case 'preticket': return verPreticket();
     case 'nueva': E.cuenta = null; E.lineaSel = null; return pintarVenta();
     case 'mesas': return ir('mesas');
-    case 'configuracion': return ir('config');
+    case 'configuracion':
+      if (!tienePermiso('configuracion')) return aviso('Tu operario no tiene permiso para entrar en configuración', true);
+      return ir('config');
+    case 'cambio_operario': return mostrarPanelOperarios();
+    case 'orden_plato': return elegirOrdenPlato();
+    case 'marchar': return marcharCocina();
+    case 'comanda': return verComanda();
     case 'borrar_linea': return borrarLinea(E.lineaSel);
     case 'borrar_todo':
       if (!confirm(`¿Borrar todo y cerrar la cuenta "${nombreCuenta(c)}"?\nLo borrado quedará en el informe de borrados.`)) return;
@@ -411,6 +436,7 @@ async function guardarCuenta() {
   E.cuenta = null;
   E.lineaSel = null;
   aviso('Cuenta guardada');
+  trasOperacion();
   return pintarVenta();
 }
 
@@ -583,6 +609,7 @@ function abrirCobro() {
       E.cuenta = null;
       E.lineaSel = null;
       verTicket(ticket);
+      trasOperacion();
       return pintarVenta();
     }
   });
@@ -751,15 +778,16 @@ async function pintarCaja() {
 
 // ---------- Gestión ----------
 const GESTION = {
-  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['grupo_cocina', 'Grupo cocina', 'grupo'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'], ['alergenos', 'Alérgenos', 'alergenos']] },
+  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['orden_plato_id', 'Orden de plato', 'ordenes_plato'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'], ['alergenos', 'Alérgenos', 'alergenos']] },
   familias: { titulo: 'Familias', campos: [['nombre', 'Nombre'], ['color', 'Color', 'color'], ['padre_id', 'Subfamilia de', 'familias'], ['departamento_id', 'Departamento', 'departamentos'], ['orden', 'Orden', 'num'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop']] },
   departamentos: { titulo: 'Departamentos', campos: [['nombre', 'Nombre']] },
   zonas: { titulo: 'Zonas', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipozona'], ['orden', 'Orden', 'num']] },
   mesas: { titulo: 'Mesas', campos: [['nombre', 'Nombre'], ['zona_id', 'Zona', 'zonas'], ['x', 'Columna', 'num'], ['y', 'Fila', 'num']] },
   formas_cobro: { titulo: 'Formas de cobro', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipocobro'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
-  operarios: { titulo: 'Operarios', campos: [['nombre', 'Nombre'], ['pin', 'PIN']] },
+  operarios: { titulo: 'Operarios', campos: [['nombre', 'Nombre'], ['pin', 'Clave (vacía = entra sin clave)', 'clave'], ['rfid', 'Pulsera RFID', 'rfid'], ['permisos', 'Permisos', 'permisos'], ['orden', 'Orden', 'num']] },
+  ordenes_plato: { titulo: 'Órdenes de plato', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
   ivas: { titulo: 'IVAs', campos: [['nombre', 'Nombre'], ['codigo', 'Código'], ['porcentaje', 'IVA %', 'num'], ['recargo', 'Recargo equivalencia %', 'num'], ['orden', 'Orden', 'num']] },
-  puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['orden', 'Orden', 'num']] },
+  puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['usar_permisos', 'Activar permisos de operarios', 'bool'], ['pedir_operario', 'Pedir operario en cada operación', 'bool'], ['orden', 'Orden', 'num']] },
   impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   comentarios: { titulo: 'Comentarios de comanda', campos: [['texto', 'Comentario'], ['familia_id', 'Solo familia', 'familias'], ['articulo_id', 'Solo artículo', 'articulos'], ['orden', 'Orden', 'num']] },
   conceptos_pago: { titulo: 'Conceptos de pago', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
@@ -772,7 +800,7 @@ const OPCIONES = {
   tipopuesto: [['tpv', 'TPV'], ['pda', 'PDA camarero'], ['kds', 'Pantalla de cocina']],
   usoimpresora: [['cocina', 'Cocina'], ['barra', 'Barra'], ['tickets', 'Tickets'], ['otro', 'Otro']],
 };
-const REFS = ['familias', 'departamentos', 'zonas', 'impresoras', 'articulos'];
+const REFS = ['familias', 'departamentos', 'zonas', 'impresoras', 'articulos', 'ordenes_plato'];
 
 function valorCelda(tipo, v) {
   if (tipo === 'euros') return euros(v);
@@ -785,12 +813,22 @@ function valorCelda(tipo, v) {
   if (tipo === 'color') return `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>`;
   if (tipo === 'imagen') return v ? `<img class="mini-tabla" src="${esc(urlImagen(v))}" alt="" loading="lazy" onerror="this.replaceWith('—')">` : '';
   if (tipo === 'alergenos') return `<span class="alerg-tabla">${iconosAlergenos(v)}</span>`;
+  if (tipo === 'clave') return v ? '••••' : 'Sin clave';
+  if (tipo === 'rfid') return v ? 'Sí' : '—';
+  if (tipo === 'permisos') return String(v || '').split(',').filter(Boolean).map(p => esc(E.datos.permisos[p] ?? p)).join(', ') || 'Ninguno';
   return esc(v);
 }
 
 function campoForm([k, etiqueta, tipo], fila) {
   const v = fila?.[k];
   if (tipo === 'bool') return `<label><span>${etiqueta}</span><select name="${k}"><option value="1" ${v !== 0 ? 'selected' : ''}>Sí</option><option value="0" ${v === 0 ? 'selected' : ''}>No</option></select></label>`;
+  if (tipo === 'clave') return `<label>${etiqueta}<input name="${k}" type="password" inputmode="numeric" autocomplete="new-password" value="${esc(v ?? '')}"></label>`;
+  if (tipo === 'rfid') return `<label>${etiqueta}<input name="${k}" value="${esc(v ?? '')}" placeholder="Toca aquí y pasa la pulsera por el lector" autocomplete="off" onkeydown="if(event.key==='Enter')event.preventDefault()"></label>`;
+  if (tipo === 'permisos') {
+    const sel = new Set(String(v || '').split(',').filter(Boolean));
+    return `<div class="campo-alergenos"><span>${etiqueta}</span><input type="hidden" name="${k}" value="${esc(v ?? '')}">
+      <div class="rejilla-permisos">${Object.entries(E.datos.permisos).map(([p, t]) => `<button type="button" data-alergeno="${p}" class="${sel.has(p) ? 'activo' : ''}">${esc(t)}</button>`).join('')}</div></div>`;
+  }
   if (tipo === 'alergenos') {
     const sel = new Set(String(v || '').split(',').filter(Boolean));
     return `<div class="campo-alergenos"><span>${etiqueta}</span><input type="hidden" name="${k}" value="${esc(v ?? '')}">
@@ -920,12 +958,14 @@ const SECCIONES_CONFIG = [
   ['Informes', [
     ['informes', 'Ventas y caja', 'Ventas por forma de cobro y por familia'],
     ['borrados', 'Borrados', 'Líneas y cuentas borradas por operario, hora, familia y artículo'],
+    ['empleados', 'Control de empleados', 'Ventas, borrados y actividad de cada operario'],
     ['registro', 'Registro de actividad', 'Todo lo que pasa en el TPV, con fecha y hora'],
   ]],
   ['Carta', [
     ['articulos', 'Artículos', 'Precios, IVA y familia'],
     ['familias', 'Familias', 'Colores, orden y subfamilias'],
     ['departamentos', 'Departamentos', 'Agrupan familias (barra, cocina...)'],
+    ['ordenes_plato', 'Órdenes de plato', 'Primeros, segundos, postres... para la comanda'],
     ['comentarios', 'Comentarios de comanda', 'Con hielo, sin azúcar... por familia o artículo'],
   ]],
   ['Local', [
@@ -933,7 +973,8 @@ const SECCIONES_CONFIG = [
     ['mesas', 'Mesas', 'Mesas de cada zona'],
     ['puestos', 'Puestos', 'TPV, PDA y pantallas de cocina'],
     ['impresoras', 'Impresoras', 'Tickets, cocina y barra'],
-    ['operarios', 'Operarios', 'Camareros y claves'],
+    ['operarios', 'Operarios', 'Camareros, claves, pulseras y permisos'],
+    ['este_puesto', 'Puesto de este dispositivo', 'Qué puesto es esta pantalla'],
   ]],
   ['Cobros e impuestos', [
     ['formas_cobro', 'Formas de pago', 'Efectivo, tarjeta, pendiente...'],
@@ -958,7 +999,8 @@ function pintarConfig() {
     const b = e.target.closest('[data-ir]');
     if (!b) return;
     const k = b.dataset.ir;
-    if (['abiertas', 'empresa', 'borrados', 'registro', 'aspecto'].includes(k)) return ir(k);
+    if (k === 'este_puesto') return elegirPuesto();
+    if (['abiertas', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados'].includes(k)) return ir(k);
     if (k === 'informes') return ir('caja');
     E.tablaGestion = k;
     return ir('gestion');
@@ -980,6 +1022,205 @@ async function pintarAbiertas() {
     E.lineaSel = null;
     return ir('venta');
   });
+}
+
+// ---------- Operarios ----------
+const puestoActual = () => E.datos?.puestos?.find(p => p.id === E.puestoId);
+const puestoPideOperario = () => !!(E.datos.operarios.length && (puestoActual()?.usar_permisos || puestoActual()?.pedir_operario));
+function tienePermiso(p) {
+  if (!puestoActual()?.usar_permisos) return true;
+  if (p === 'configuracion' && !E.datos.operarios.some(o => o.permisos.includes('configuracion'))) return true;
+  return !!E.operario?.permisos.includes(p);
+}
+function ponerOperario(o) {
+  E.operario = o ? { id: o.id, nombre: o.nombre, permisos: o.permisos } : null;
+  try { sessionStorage.setItem('operario', JSON.stringify(E.operario)); } catch {}
+  pintarOperarioActual();
+}
+function pintarOperarioActual() {
+  let el = $('#operario-actual');
+  if (!el) {
+    el = document.createElement('button');
+    el.id = 'operario-actual';
+    el.title = 'Cambio de operario';
+    el.onclick = () => mostrarPanelOperarios();
+    $('.estado').prepend(el);
+  }
+  el.textContent = E.operario ? `👤 ${E.operario.nombre}` : '👤 Sin operario';
+  el.classList.toggle('oculto', !E.datos?.operarios?.length);
+}
+// Tras cobrar o guardar: si el puesto pide operario en cada operación, se vuelve al panel.
+function trasOperacion() {
+  if (!puestoActual()?.pedir_operario || !E.datos.operarios.length) return;
+  ponerOperario(null);
+  if ($('#modal').classList.contains('oculto')) mostrarPanelOperarios();
+  else E.pedirTrasModal = true;
+}
+
+async function entrarOperario(datos) {
+  const o = await api('POST', '/operarios/entrar', datos);
+  ponerOperario(o);
+  $('#panel-operarios')?.remove();
+  aviso(`Hola, ${o.nombre}`);
+}
+
+function mostrarPanelOperarios() {
+  $('#panel-operarios')?.remove();
+  const obligatorio = puestoPideOperario();
+  const panel = document.createElement('div');
+  panel.id = 'panel-operarios';
+  panel.innerHTML = `<div class="po-caja">
+    <div class="po-cab"><h2>¿Quién eres?</h2><small>Toca tu nombre o pasa tu pulsera por el lector</small></div>
+    <div class="po-nombres">${E.datos.operarios.map(o => `<button data-op="${o.id}"><b>${esc(o.nombre)}</b>${o.con_clave ? '<small>🔒 con clave</small>' : ''}</button>`).join('')
+      || '<div class="vacio">No hay operarios. Créalos en Configuración, Operarios.</div>'}</div>
+    <div class="po-clave oculto" id="po-clave">
+      <div class="po-nombre" id="po-nombre"></div>
+      <div class="po-puntos" id="po-puntos"></div>
+      <div class="po-teclas">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(k => `<button data-k="${k}">${k}</button>`).join('')}</div>
+      <div class="po-acc"><button data-volver-op="1">Volver</button><button class="primario" data-ok="1">Entrar</button></div>
+    </div>
+    <div class="po-pie">
+      <span>Puesto: <b>${esc(puestoActual()?.nombre ?? '—')}</b></span>
+      ${obligatorio ? '' : '<button data-cerrar-op="1">Seguir sin operario</button>'}
+    </div>
+  </div>`;
+  document.body.append(panel);
+  let elegido = null, clave = '';
+  const pintarClave = () => { $('#po-puntos').textContent = '•'.repeat(clave.length) || ' '; };
+  panel.onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.cerrarOp) return panel.remove();
+    if (b.dataset.op) {
+      elegido = E.datos.operarios.find(o => o.id === Number(b.dataset.op));
+      if (!elegido.con_clave) return entrarOperario({ operario_id: elegido.id });
+      clave = '';
+      $('#po-nombre').textContent = elegido.nombre;
+      pintarClave();
+      $('.po-nombres', panel).classList.add('oculto');
+      $('#po-clave').classList.remove('oculto');
+      return;
+    }
+    if (b.dataset.volverOp) { $('#po-clave').classList.add('oculto'); $('.po-nombres', panel).classList.remove('oculto'); return; }
+    if (b.dataset.k) {
+      const k = b.dataset.k;
+      clave = k === 'C' ? '' : k === '⌫' ? clave.slice(0, -1) : (clave + k).slice(0, 12);
+      return pintarClave();
+    }
+    if (b.dataset.ok) {
+      try { await entrarOperario({ operario_id: elegido.id, clave }); }
+      catch (err) { clave = ''; pintarClave(); throw err; }
+    }
+  });
+}
+
+// Lector RFID: escribe el código muy rápido y termina con Enter, como un teclado.
+(() => {
+  let buf = '', ultimo = 0;
+  document.addEventListener('keydown', e => {
+    if (e.target.closest?.('input, textarea, select')) return;
+    const ahora = Date.now();
+    if (ahora - ultimo > 80) buf = '';
+    ultimo = ahora;
+    if (e.key === 'Enter') {
+      if (buf.length >= 4) { const codigo = buf; buf = ''; e.preventDefault(); intentar(() => entrarOperario({ rfid: codigo })); }
+      buf = '';
+    } else if (e.key.length === 1) buf += e.key;
+  });
+})();
+
+function elegirPuesto() {
+  abrirModal(`<h2><span>Puesto de este dispositivo</span><button data-m="cerrar">✕</button></h2>
+    <div class="form"><p class="nota">Cada pantalla (TPV, PDA...) es un puesto. Sus opciones de operarios y permisos se configuran en Configuración, Puestos.</p>
+    <div class="po-nombres">${E.datos.puestos.map(p => `<button data-puesto="${p.id}" class="${p.id === E.puestoId ? 'activo' : ''}"><b>${esc(p.nombre)}</b><small>${p.usar_permisos ? 'Con permisos' : 'Sin permisos'}${p.pedir_operario ? ' · pide operario' : ''}</small></button>`).join('')}</div></div>`);
+  $('#modal-caja').onclick = e => {
+    const b = e.target.closest('button');
+    if (b?.dataset.m === 'cerrar') return cerrarModal();
+    if (b?.dataset.puesto) {
+      E.puestoId = Number(b.dataset.puesto);
+      try { localStorage.setItem('puesto', String(E.puestoId)); } catch {}
+      cerrarModal();
+      aviso(`Este dispositivo es ahora "${puestoActual().nombre}"`);
+      if (!E.operario && puestoPideOperario()) mostrarPanelOperarios();
+    }
+  };
+}
+
+// ---------- Orden de comanda y marchar ----------
+function elegirOrdenPlato() {
+  const c = E.cuenta;
+  const l = c.lineas.find(x => x.id === E.lineaSel);
+  const opciones = E.datos.ordenes_plato;
+  if (!opciones.length) return aviso('Crea primero los órdenes de plato en Configuración', true);
+  abrirModal(`<h2><span>Orden de comanda</span><button data-m="cerrar">✕</button></h2>
+    <div class="form">
+      <p>${l ? `Para <b>${esc(l.descripcion)}</b>` : 'Para <b>todas las líneas sin orden</b> (selecciona una línea para cambiar solo esa)'}</p>
+      <div class="po-nombres ordenes">${opciones.map(o => `<button data-op="${o.id}" class="${l?.orden_plato_id === o.id ? 'activo' : ''}"><b>${esc(o.nombre)}</b></button>`).join('')}
+        ${l?.orden_plato_id ? '<button data-op="0"><b>Quitar orden</b></button>' : ''}</div>
+    </div>`);
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (b?.dataset.m === 'cerrar') return cerrarModal();
+    if (!b?.dataset.op) return;
+    const id = Number(b.dataset.op) || null;
+    E.cuenta = await api('POST', `/cuentas/${c.id}/orden_plato`, { orden_plato_id: id, lineas: l ? [l.id] : [] });
+    cerrarModal();
+    return pintarVenta();
+  });
+}
+
+function marcharCocina() {
+  const c = E.cuenta;
+  abrirModal(`<h2><span>Marchar cocina · ${esc(nombreCuenta(c))}</span><button data-m="cerrar">✕</button></h2>
+    <div class="form"><p>¿Qué hay que marchar?</p>
+      <div class="po-nombres ordenes">${E.datos.ordenes_plato.map(o => `<button data-op="${o.id}"><b>${esc(o.nombre)}</b><small>${c.lineas.filter(x => x.orden_plato_id === o.id).length} líneas</small></button>`).join('')}</div>
+    </div>`);
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (b?.dataset.m === 'cerrar') return cerrarModal();
+    if (!b?.dataset.op) return;
+    const r = await api('POST', `/cuentas/${c.id}/marchar`, { orden_plato_id: Number(b.dataset.op) });
+    cerrarModal();
+    aviso(`Enviado: ${r.texto}`);
+  });
+}
+
+async function verComanda() {
+  const r = await api('GET', `/cuentas/${E.cuenta.id}/comanda`);
+  abrirModal(`<h2><span>Comanda</span><button data-m="cerrar">✕</button></h2>
+    <div class="ticket comanda-previa"><div class="c"><b>${esc(r.cuenta)}</b><br>${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}${E.operario ? ' · ' + esc(E.operario.nombre) : ''}</div>
+      ${r.grupos.map(g => `<div class="grupo-comanda">— ${esc(g.nombre.toUpperCase())} —</div>${g.lineas.map(l => `<div class="fila"><span>${uds(l.unidades)} x ${esc(l.texto)}</span></div>`).join('')}`).join('')}
+    </div>
+    <p class="nota" style="padding:0 16px">Así saldrá en la impresora de cocina o barra cuando conectemos las impresoras.</p>
+    <div class="botones"><button data-m="cerrar">Cerrar</button></div>`);
+  $('#modal-caja').onclick = e => { if (e.target.closest('[data-m="cerrar"]')) cerrarModal(); };
+}
+
+// ---------- Control de empleados ----------
+async function pintarEmpleados(desde = E.empDesde ?? hoyLocal(), hasta = E.empHasta ?? hoyLocal(), op = E.empOp ?? '') {
+  E.empDesde = desde; E.empHasta = hasta; E.empOp = op;
+  const r = await api('GET', `/informes/empleados?desde=${desde}&hasta=${hasta}&operario=${op}`);
+  $('#vista').innerHTML = `<div class="informe scroll">
+    ${cabeceraConfig('Control de empleados')}
+    <div class="filtros">
+      <label>Desde <input type="date" id="e-desde" value="${desde}"></label>
+      <label>Hasta <input type="date" id="e-hasta" value="${hasta}"></label>
+      <label>Operario <select id="e-op"><option value="">Todos</option>${E.datos.operarios.map(o => `<option value="${o.id}" ${String(o.id) === String(op) ? 'selected' : ''}>${esc(o.nombre)}</option>`).join('')}</select></label>
+    </div>
+    <section class="panel"><table><thead><tr><th>Operario</th><th class="num">Tickets</th><th class="num">Vendido</th><th class="num">Artículos</th>
+      <th class="num">Anulaciones</th><th class="num">Importe anulado</th><th class="num">Líneas borradas</th><th class="num">Importe borrado</th></tr></thead><tbody>
+      ${r.empleados.map(x => `<tr><td><b>${esc(x.nombre)}</b></td><td class="num">${x.tickets}</td><td class="num">${euros(x.vendido)}</td><td class="num">${uds(x.unidades)}</td>
+        <td class="num">${x.anulaciones}</td><td class="num">${euros(x.anulado)}</td><td class="num">${x.lineas_borradas}</td><td class="num">${euros(x.importe_borrado)}</td></tr>`).join('')
+        || '<tr><td colspan="8" class="vacio">Sin datos en estas fechas</td></tr>'}
+    </tbody></table></section>
+    <h3>Qué ha hecho cada uno</h3>
+    <section class="panel"><table><thead><tr><th>Fecha y hora</th><th>Operario</th><th>Acción</th></tr></thead><tbody>
+      ${r.actividad.map(a => `<tr class="nivel-${esc(a.nivel)}"><td>${esc(a.fecha.slice(8, 10) + '/' + a.fecha.slice(5, 7) + ' ' + a.fecha.slice(11, 19))}</td><td>${esc(a.operario || '—')}</td><td>${esc(a.accion)}</td></tr>`).join('')
+        || '<tr><td colspan="3" class="vacio">Sin actividad</td></tr>'}
+    </tbody></table></section>
+  </div>`;
+  $('#vista').onchange = () => intentar(() => pintarEmpleados($('#e-desde').value, $('#e-hasta').value, $('#e-op').value));
+  $('#vista').onclick = e => { if (e.target.closest('[data-volver]')) ir('config'); };
 }
 
 // ---------- Paleta de colores ----------
@@ -1360,7 +1601,9 @@ function reloj() {
 intentar(async () => {
   reloj();
   setInterval(reloj, 15000);
+  try { E.operario = JSON.parse(sessionStorage.getItem('operario') || 'null'); } catch {}
   await cargarDatos();
   await ir('venta');
   conectarEventos();
+  if (!E.operario && puestoPideOperario()) mostrarPanelOperarios();
 });

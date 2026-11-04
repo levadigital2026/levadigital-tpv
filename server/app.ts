@@ -8,6 +8,8 @@ import * as v from './ventas.ts';
 import * as g from './gestion.ts';
 import { registrar, describir, leerRegistro } from './registro.ts';
 import { listarImagenes, subirImagen, leerImagen, listaAlergenos } from './imagenes.ts';
+import * as o from './operarios.ts';
+import { PERMISOS } from './db.ts';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TIPOS: Record<string, string> = {
@@ -42,6 +44,10 @@ ruta('GET', '/api/inicio', async ({ db }) => ({
   botones: g.listar(db, 'botones'),
   impresoras: g.listar(db, 'impresoras'),
   comentarios: g.listar(db, 'comentarios'),
+  ordenes_plato: g.listar(db, 'ordenes_plato'),
+  operarios: o.operariosPublicos(db),
+  puestos: g.listar(db, 'puestos'),
+  permisos: PERMISOS,
   aspecto: g.getAspecto(db),
   aspecto_campos: g.ASPECTO,
   acciones: ACCIONES,
@@ -53,6 +59,12 @@ ruta('GET', '/api/cuentas/:id', ({ db, params }) => v.getCuenta(db, num(params[0
 ruta('PATCH', '/api/cuentas/:id', ({ db, params, body }) => v.actualizarCuenta(db, num(params[0]), body));
 ruta('DELETE', '/api/cuentas/:id/lineas', ({ db, params }) => v.borrarTodasLineas(db, num(params[0])));
 ruta('POST', '/api/cuentas/:id/lineas', ({ db, params, body }) => v.anadirLinea(db, num(params[0]), body));
+ruta('POST', '/api/cuentas/:id/orden_plato', ({ db, params, body }) => v.asignarOrdenPlato(db, num(params[0]), body));
+ruta('GET', '/api/cuentas/:id/comanda', ({ db, params }) => v.comandaCuenta(db, num(params[0])));
+ruta('POST', '/api/cuentas/:id/marchar', ({ db, params, body }) => v.marchar(db, num(params[0]), body));
+ruta('GET', '/api/cocina/marchas', ({ db }) => db.prepare('SELECT * FROM marchas ORDER BY id DESC LIMIT 50').all());
+ruta('POST', '/api/operarios/entrar', ({ db, body }) => o.entrar(db, body));
+ruta('GET', '/api/informes/empleados', ({ db, url }) => o.informeEmpleados(db, url.searchParams.get('desde'), url.searchParams.get('hasta'), url.searchParams.get('operario')));
 ruta('POST', '/api/cuentas/:id/cobrar', ({ db, params, body }) => v.cobrarCuenta(db, num(params[0]), body));
 ruta('PATCH', '/api/lineas/:id', ({ db, params, body }) => v.modificarLinea(db, num(params[0]), body));
 ruta('DELETE', '/api/lineas/:id', ({ db, params }) => v.borrarLinea(db, num(params[0])));
@@ -126,6 +138,11 @@ export function crearServidor(db: DB) {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const origen = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
     let body: any = {};
+    // Operario en uso y puesto, que manda cada pantalla en las cabeceras.
+    const idCab = (n: string) => { const x = Number(req.headers[n]); return Number.isInteger(x) && x > 0 ? x : null; };
+    const opId = idCab('x-operario');
+    const operario = opId ? o.operarioPorId(db, opId) : null;
+    const quien = operario ? { id: operario.id, nombre: operario.nombre } : null;
     try {
       if (url.pathname === '/api/eventos') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
@@ -148,10 +165,13 @@ export function crearServidor(db: DB) {
           const m = r.patron.exec(url.pathname);
           if (!m) continue;
           body = r.metodo === 'GET' ? {} : await leerCuerpo(req);
-          const data = await r.handler({ db, params: m.slice(1).map(decodeURIComponent), body, url });
+          o.comprobarPermiso(db, idCab('x-puesto'), operario, r.metodo, url.pathname);
+          v.contexto.operario = quien;
+          const data: any = await r.handler({ db, params: m.slice(1).map(decodeURIComponent), body, url });
           json(res, 200, data);
           if (r.cambia) {
-            registrar(db, { accion: describir(r.metodo, url.pathname), metodo: r.metodo, ruta: url.pathname, estado: 200, origen, datos: body });
+            const deQuien = url.pathname === '/api/operarios/entrar' ? { id: data.id, nombre: data.nombre } : quien;
+            registrar(db, { operario: deQuien, accion: describir(r.metodo, url.pathname), metodo: r.metodo, ruta: url.pathname, estado: 200, origen, datos: body });
             avisar(url.pathname.split('/')[2]);
           }
           return;
@@ -166,6 +186,7 @@ export function crearServidor(db: DB) {
       if (url.pathname.startsWith('/api/')) {
         const metodo = req.method ?? '';
         registrar(db, {
+          operario: quien,
           nivel: status >= 500 ? 'error' : 'aviso', accion: `${describir(metodo, url.pathname)}: ${status === 500 ? String(e?.message ?? e) : e.message}`,
           metodo, ruta: url.pathname, estado: status, origen, datos: body,
         });

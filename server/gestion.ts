@@ -1,9 +1,9 @@
 // Mantenimiento de tablas: departamentos, familias, artículos, zonas, mesas, formas de cobro y empresa.
-import { type DB, ACCIONES } from './db.ts';
+import { type DB, ACCIONES, PERMISOS } from './db.ts';
 import { ErrorTPV } from './ventas.ts';
 import { rutaValida, CODIGOS_ALERGENOS, buscarImagenPara, existeImagen } from './imagenes.ts';
 
-type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref' | 'imagen' | 'color' | 'alergenos'; obligatorio?: boolean; valores?: string[] };
+type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref' | 'imagen' | 'color' | 'alergenos' | 'lista'; obligatorio?: boolean; valores?: string[] };
 
 // Campos que se pueden escribir desde la API para cada tabla.
 export const TABLAS: Record<string, Record<string, Campo>> = {
@@ -15,7 +15,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   },
   articulos: {
     nombre: { tipo: 'texto', obligatorio: true }, precio: { tipo: 'entero' }, iva: { tipo: 'decimal' },
-    familia_id: { tipo: 'ref' }, grupo_cocina: { tipo: 'entero' }, orden: { tipo: 'entero' }, activo: { tipo: 'bool' },
+    familia_id: { tipo: 'ref' }, grupo_cocina: { tipo: 'entero' }, orden_plato_id: { tipo: 'ref' }, orden: { tipo: 'entero' }, activo: { tipo: 'bool' },
     imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' }, alergenos: { tipo: 'alergenos' },
   },
   zonas: { nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['barra', 'mesas'] }, orden: { tipo: 'entero' } },
@@ -24,7 +24,11 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['efectivo', 'tarjeta', 'pendiente', 'otro'] },
     activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
   },
-  operarios: { nombre: { tipo: 'texto', obligatorio: true }, pin: { tipo: 'texto' } },
+  operarios: {
+    nombre: { tipo: 'texto', obligatorio: true }, pin: { tipo: 'texto' }, rfid: { tipo: 'texto' },
+    permisos: { tipo: 'lista', valores: Object.keys(PERMISOS) }, orden: { tipo: 'entero' },
+  },
+  ordenes_plato: { nombre: { tipo: 'texto', obligatorio: true }, orden: { tipo: 'entero' } },
   ivas: {
     nombre: { tipo: 'texto', obligatorio: true }, codigo: { tipo: 'texto' }, porcentaje: { tipo: 'decimal', obligatorio: true },
     recargo: { tipo: 'decimal' }, orden: { tipo: 'entero' },
@@ -32,6 +36,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   puestos: {
     nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['tpv', 'pda', 'kds'] },
     impresora_tickets_id: { tipo: 'ref' }, orden: { tipo: 'entero' },
+    usar_permisos: { tipo: 'bool' }, pedir_operario: { tipo: 'bool' },
   },
   impresoras: {
     nombre: { tipo: 'texto', obligatorio: true }, ip: { tipo: 'texto' }, puerto: { tipo: 'entero' },
@@ -84,6 +89,12 @@ function limpiar(tabla: string, datos: Record<string, unknown>, nuevo: boolean) 
         out[k] = s;
         break;
       }
+      case 'lista': {
+        const lista = (Array.isArray(v) ? v : String(v ?? '').split(',')).map(x => String(x).trim()).filter(Boolean);
+        if (lista.some(x => !c.valores!.includes(x))) throw new ErrorTPV(`Valor no válido en ${k}`);
+        out[k] = [...new Set(lista)].join(',');
+        break;
+      }
       case 'alergenos': {
         const lista = (Array.isArray(v) ? v : String(v ?? '').split(',')).map(x => String(x).trim()).filter(Boolean);
         if (lista.some(x => !CODIGOS_ALERGENOS.has(x))) throw new ErrorTPV('Alérgeno desconocido');
@@ -121,9 +132,17 @@ export function listar(db: DB, tabla: string) {
   return db.prepare(`SELECT * FROM ${tabla} ORDER BY ${orden}`).all();
 }
 
+// Una pulsera RFID solo puede ser de un operario.
+function rfidLibre(db: DB, tabla: string, v: Record<string, unknown>, id: number | null) {
+  if (tabla !== 'operarios' || !v.rfid) return;
+  const otro = db.prepare('SELECT nombre FROM operarios WHERE rfid = ? AND id IS NOT ?').get(v.rfid, id) as { nombre: string } | undefined;
+  if (otro) throw new ErrorTPV(`Esa pulsera ya es de ${otro.nombre}`);
+}
+
 export function crear(db: DB, tabla: string, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, true);
+  rfidLibre(db, tabla, v, null);
   const cols = Object.keys(v);
   const r = db.prepare(`INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
     .run(...Object.values(v));
@@ -153,6 +172,7 @@ export function actualizar(db: DB, tabla: string, id: number, datos: Record<stri
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, false);
   protegerConfiguracion(db, tabla, id, v);
+  rfidLibre(db, tabla, v, id);
   if (tabla === 'familias' && v.padre_id != null) evitarCiclo(db, id, Number(v.padre_id));
   const cols = Object.keys(v);
   if (cols.length) {

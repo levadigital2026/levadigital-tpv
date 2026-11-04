@@ -12,6 +12,9 @@ export class ErrorTPV extends Error {
 
 type Row = Record<string, any>;
 
+// Operario que hace la petición en curso (lo pone el servidor antes de llamar a cada función).
+export const contexto: { operario: { id: number; nombre: string } | null } = { operario: null };
+
 export function importeLinea(l: { unidades: number; precio: number }): number {
   return Math.round(l.unidades * l.precio);
 }
@@ -47,8 +50,8 @@ export function abrirCuenta(db: DB, datos: { zona_id: number; mesa_id?: number |
     const abierta = db.prepare("SELECT id FROM cuentas WHERE mesa_id = ? AND estado = 'abierta'").get(datos.mesa_id) as Row | undefined;
     if (abierta) return getCuenta(db, abierta.id);
   }
-  const r = db.prepare('INSERT INTO cuentas (zona_id, mesa_id, nombre, comensales) VALUES (?, ?, ?, ?)')
-    .run(datos.zona_id, datos.mesa_id ?? null, datos.nombre ?? '', datos.comensales ?? 0);
+  const r = db.prepare('INSERT INTO cuentas (zona_id, mesa_id, nombre, comensales, operario_id) VALUES (?, ?, ?, ?, ?)')
+    .run(datos.zona_id, datos.mesa_id ?? null, datos.nombre ?? '', datos.comensales ?? 0, contexto.operario?.id ?? null);
   return getCuenta(db, Number(r.lastInsertRowid));
 }
 
@@ -72,9 +75,9 @@ export function anadirLinea(db: DB, cuentaId: number, datos: { articulo_id: numb
   if (!a) throw new ErrorTPV('El artículo no existe');
   const unidades = datos.unidades ?? 1;
   if (!(unidades > 0)) throw new ErrorTPV('Las unidades deben ser mayores que 0');
-  db.prepare(`INSERT INTO lineas (cuenta_id, articulo_id, descripcion, unidades, precio, iva, grupo_cocina)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(cuentaId, a.id, a.nombre, unidades, a.precio, a.iva, a.grupo_cocina);
+  db.prepare(`INSERT INTO lineas (cuenta_id, articulo_id, descripcion, unidades, precio, iva, grupo_cocina, orden_plato_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(cuentaId, a.id, a.nombre, unidades, a.precio, a.iva, a.grupo_cocina, a.orden_plato_id ?? null);
   return getCuenta(db, cuentaId);
 }
 
@@ -110,9 +113,11 @@ function apuntarBorrados(db: DB, cuentaId: number, lineas: Row[], tipo: 'linea' 
   const fam = db.prepare('SELECT f.id, f.nombre FROM articulos a JOIN familias f ON f.id = a.familia_id WHERE a.id = ?');
   const ins = db.prepare(`INSERT INTO borrados (tipo, cuenta_id, cuenta, operario_id, operario, articulo_id, descripcion, familia_id, familia, unidades, precio, importe)
                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  // Quien borra es el operario en uso; si no hay, el que abrió la cuenta.
+  const op = contexto.operario ?? (c.operario_id ? { id: c.operario_id, nombre: c.operario ?? '' } : null);
   for (const l of lineas) {
     const f = (l.articulo_id ? fam.get(l.articulo_id) : undefined) as Row | undefined;
-    ins.run(tipo, cuentaId, nombreCuenta, c.operario_id ?? null, c.operario ?? '', l.articulo_id ?? null, l.descripcion,
+    ins.run(tipo, cuentaId, nombreCuenta, op?.id ?? null, op?.nombre ?? '', l.articulo_id ?? null, l.descripcion,
       f?.id ?? null, f?.nombre ?? '', l.unidades, l.precio, importeLinea(l as any));
   }
 }
@@ -162,6 +167,55 @@ export function informeBorrados(db: DB, desde?: string | null, hasta?: string | 
   };
 }
 
+// Nombre de la cuenta como se dice en cocina: "Mesa 1 de Comedor" o "Barra · barba".
+function nombreParaCocina(db: DB, cuentaId: number) {
+  const c = db.prepare(`SELECT c.nombre, z.nombre AS zona, m.nombre AS mesa FROM cuentas c JOIN zonas z ON z.id = c.zona_id
+                        LEFT JOIN mesas m ON m.id = c.mesa_id WHERE c.id = ?`).get(cuentaId) as Row;
+  if (c.mesa) return `${/^mesa\b/i.test(c.mesa) ? c.mesa : 'Mesa ' + c.mesa} de ${c.zona}`;
+  return [c.zona, c.nombre].filter(Boolean).join(' · ');
+}
+
+// Pone el orden de plato a unas líneas (o a todas las que no tengan) de una cuenta abierta.
+export function asignarOrdenPlato(db: DB, cuentaId: number, datos: { orden_plato_id?: number | null; lineas?: number[] }) {
+  cuentaAbierta(db, cuentaId);
+  const op = datos.orden_plato_id == null ? null : Number(datos.orden_plato_id);
+  if (op !== null && !db.prepare('SELECT 1 FROM ordenes_plato WHERE id = ?').get(op)) throw new ErrorTPV('Orden de plato no válido');
+  if (Array.isArray(datos.lineas) && datos.lineas.length) {
+    const upd = db.prepare('UPDATE lineas SET orden_plato_id = ? WHERE id = ? AND cuenta_id = ?');
+    for (const id of datos.lineas) upd.run(op, Number(id), cuentaId);
+  } else {
+    db.prepare('UPDATE lineas SET orden_plato_id = ? WHERE cuenta_id = ? AND orden_plato_id IS NULL').run(op, cuentaId);
+  }
+  return getCuenta(db, cuentaId);
+}
+
+// Comanda agrupada por orden de plato, con el texto modificado por el camarero.
+export function comandaCuenta(db: DB, cuentaId: number) {
+  getCuenta(db, cuentaId);
+  const lineas = db.prepare(`SELECT l.*, o.nombre AS orden_plato FROM lineas l
+    LEFT JOIN ordenes_plato o ON o.id = l.orden_plato_id WHERE l.cuenta_id = ? ORDER BY o.orden IS NULL, o.orden, l.id`).all(cuentaId) as Row[];
+  const grupos: { orden_plato_id: number | null; nombre: string; lineas: { unidades: number; texto: string }[] }[] = [];
+  for (const l of lineas) {
+    let g = grupos.find(x => x.orden_plato_id === (l.orden_plato_id ?? null));
+    if (!g) grupos.push(g = { orden_plato_id: l.orden_plato_id ?? null, nombre: l.orden_plato ?? 'Sin orden', lineas: [] });
+    g.lineas.push({ unidades: l.unidades, texto: l.detalle || l.descripcion });
+  }
+  return { cuenta: nombreParaCocina(db, cuentaId), grupos };
+}
+
+// "Marchar": avisa a cocina de que empiece un orden de plato de una mesa.
+export function marchar(db: DB, cuentaId: number, datos: { orden_plato_id?: number }) {
+  cuentaAbierta(db, cuentaId);
+  const o = db.prepare('SELECT * FROM ordenes_plato WHERE id = ?').get(Number(datos.orden_plato_id)) as Row | undefined;
+  if (!o) throw new ErrorTPV('Elige qué orden de plato marchar');
+  const cuenta = nombreParaCocina(db, cuentaId);
+  const texto = `MARCHAR ${o.nombre} · ${cuenta}`;
+  const op = contexto.operario;
+  db.prepare('INSERT INTO marchas (cuenta_id, cuenta, orden_plato_id, orden_plato, texto, operario_id, operario) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(cuentaId, cuenta, o.id, o.nombre, texto, op?.id ?? null, op?.nombre ?? '');
+  return { texto };
+}
+
 // Huella encadenada: cada ticket incluye la huella del anterior, así no se puede
 // borrar ni cambiar un ticket sin que se note. El formato definitivo lo fijará
 // TicketBAI/Verifactu en la fase 4.
@@ -186,6 +240,7 @@ function emitirTicket(db: DB, datos: {
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(serie, numero, datos.cuenta_id, emitido_en, datos.total, datos.forma_cobro_id, datos.entregado, datos.cambio, datos.anula_ticket_id ?? null, anterior, huella);
   const ticketId = Number(r.lastInsertRowid);
+  if (contexto.operario) db.prepare('UPDATE tickets SET operario_id = ? WHERE id = ?').run(contexto.operario.id, ticketId);
   const ins = db.prepare('INSERT INTO ticket_lineas (ticket_id, articulo_id, descripcion, unidades, precio, iva, importe) VALUES (?, ?, ?, ?, ?, ?, ?)');
   for (const l of datos.lineas) ins.run(ticketId, l.articulo_id, l.descripcion, l.unidades, l.precio, l.iva, importeLinea(l));
   return ticketId;

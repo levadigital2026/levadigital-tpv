@@ -14,6 +14,9 @@ export function usarCarpetaRegistro(dir: string | null) {
 // Nombre legible de lo que hace cada petición.
 const ACCIONES: [string, RegExp, string][] = [
   ['POST', /^\/api\/cuentas$/, 'Abrir cuenta'],
+  ['POST', /^\/api\/operarios\/entrar$/, 'Entrada de operario'],
+  ['POST', /^\/api\/cuentas\/\d+\/orden_plato$/, 'Poner orden de plato'],
+  ['POST', /^\/api\/cuentas\/\d+\/marchar$/, 'Marchar cocina'],
   ['PATCH', /^\/api\/cuentas\/\d+$/, 'Cambiar datos de la cuenta'],
   ['POST', /^\/api\/cuentas\/\d+\/lineas$/, 'Añadir artículo'],
   ['DELETE', /^\/api\/cuentas\/\d+\/lineas$/, 'Borrar todo y cerrar la cuenta'],
@@ -47,7 +50,7 @@ function resumirDatos(datos: unknown) {
   return limpio.length > 500 ? limpio.slice(0, 500) + '…' : limpio;
 }
 
-export type Entrada = { nivel?: 'info' | 'aviso' | 'error'; accion: string; metodo?: string; ruta?: string; estado?: number; origen?: string; datos?: unknown };
+export type Entrada = { nivel?: 'info' | 'aviso' | 'error'; operario?: { id: number; nombre: string } | null; accion: string; metodo?: string; ruta?: string; estado?: number; origen?: string; datos?: unknown };
 
 export function registrar(db: DB, e: Entrada) {
   const fila = {
@@ -55,15 +58,15 @@ export function registrar(db: DB, e: Entrada) {
     estado: e.estado ?? 0, origen: e.origen ?? '', datos: resumirDatos(e.datos),
   };
   try {
-    db.prepare('INSERT INTO registro (nivel, accion, metodo, ruta, estado, origen, datos) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(fila.nivel, fila.accion, fila.metodo, fila.ruta, fila.estado, fila.origen, fila.datos);
+    db.prepare('INSERT INTO registro (nivel, accion, metodo, ruta, estado, origen, datos, operario_id, operario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(fila.nivel, fila.accion, fila.metodo, fila.ruta, fila.estado, fila.origen, fila.datos, e.operario?.id ?? null, e.operario?.nombre ?? '');
   } catch (err) {
     console.error('No se pudo guardar el registro:', err);
   }
   if (carpeta) {
     const ahora = new Date();
     const local = new Date(ahora.getTime() - ahora.getTimezoneOffset() * 60000).toISOString();
-    const linea = [local.slice(0, 19).replace('T', ' '), fila.nivel.toUpperCase(), fila.origen, fila.estado || '', fila.accion,
+    const linea = [local.slice(0, 19).replace('T', ' '), fila.nivel.toUpperCase(), fila.origen, e.operario?.nombre ?? '', fila.estado || '', fila.accion,
       fila.metodo && `${fila.metodo} ${fila.ruta}`, fila.datos].filter(x => x !== '').join(' | ');
     appendFile(join(carpeta, `${local.slice(0, 10)}.log`), linea + '\n').catch(() => {});
   }
