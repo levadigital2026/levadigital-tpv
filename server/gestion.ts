@@ -1,5 +1,5 @@
 // Mantenimiento de tablas: departamentos, familias, artículos, zonas, mesas, formas de cobro y empresa.
-import type { DB } from './db.ts';
+import { type DB, ACCIONES } from './db.ts';
 import { ErrorTPV } from './ventas.ts';
 
 type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref'; obligatorio?: boolean; valores?: string[] };
@@ -22,6 +22,10 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
   },
   operarios: { nombre: { tipo: 'texto', obligatorio: true }, pin: { tipo: 'texto' } },
+  botones: {
+    accion: { tipo: 'texto', obligatorio: true, valores: Object.keys(ACCIONES) }, texto: { tipo: 'texto', obligatorio: true },
+    color: { tipo: 'texto' }, orden: { tipo: 'entero' }, visible: { tipo: 'bool' },
+  },
 };
 
 function limpiar(tabla: string, datos: Record<string, unknown>, nuevo: boolean) {

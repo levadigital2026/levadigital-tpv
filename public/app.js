@@ -53,6 +53,7 @@ const E = {
   zonaMesas: null,
   ticketSel: null,
   tablaGestion: 'articulos',
+  verTeclado: (() => { try { return localStorage.getItem('verTeclado') === '1'; } catch { return false; } })(),
 };
 
 async function cargarDatos() {
@@ -98,31 +99,33 @@ async function pintarVenta() {
   const colorDe = id => E.datos.familias.find(f => f.id === id)?.color ?? '#0064fc';
 
   $('#vista').innerHTML = `
-  <div class="venta">
+  <div class="venta ${E.verTeclado ? 'ver-teclado' : ''}">
     <section class="panel cuenta">
       <div class="cuenta-cab">
         <div><b>${esc(nombreCuenta(c))}</b><small>${c ? `${c.comensales ? c.comensales + ' comensales · ' : ''}abierta ${hora(c.abierta_en)}` : 'Toca un artículo para empezar'}</small></div>
-        <button id="b-teclado" title="Calculadora">123</button>
+        <button id="b-teclado" title="Mostrar u ocultar la calculadora" class="${E.verTeclado ? 'activo' : ''}">123</button>
       </div>
       <div class="lineas">
         ${c && c.lineas.length ? c.lineas.map(l => `
-          <div class="linea ${l.id === E.lineaSel ? 'sel' : ''}" data-linea="${l.id}">
-            <span class="uds">${uds(l.unidades)}</span><span>${esc(l.descripcion)}</span><span>${euros(Math.round(l.unidades * l.precio))}</span>
-            ${l.detalle ? `<span class="det">${esc(l.detalle)}</span>` : ''}
+          <div class="linea-caja">
+            <button class="linea-anular" data-anular="${l.id}">Anular</button>
+            <div class="linea ${l.id === E.lineaSel ? 'sel' : ''}" data-linea="${l.id}">
+              <span class="uds">${uds(l.unidades)}</span><span>${esc(l.descripcion)}</span><span>${euros(Math.round(l.unidades * l.precio))}</span>
+              ${l.detalle ? `<span class="det">${esc(l.detalle)}</span>` : ''}
+            </div>
           </div>`).join('') : '<div class="vacio">Sin artículos</div>'}
       </div>
       <div class="total"><span>Total</span><span>${euros(c?.total ?? 0)}</span></div>
       <div class="teclado">
         <div class="pantalla" id="calc">${esc(E.calc)}</div>
-        ${['7', '8', '9', 'C', '4', '5', '6', 'Un', '1', '2', '3', '€', '0', ',', 'Det', 'Borrar'].map(k =>
-          `<button data-tecla="${k}" class="${k === 'Borrar' ? 'peligro' : ''}">${k}</button>`).join('')}
+        ${['7', '8', '9', 'C', '4', '5', '6', 'Un', '1', '2', '3', '€', '0', ',', '00', '⌫'].map(k =>
+          `<button data-tecla="${k}">${k}</button>`).join('')}
       </div>
       <div class="acciones">
-        <button id="b-guardar" ${c ? '' : 'disabled'}>Guardar</button>
-        <button id="b-preticket" ${c?.lineas.length ? '' : 'disabled'}>Pre-ticket</button>
-        <button id="b-nueva">Nueva</button>
-        <button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}>Cobrar ${c?.lineas.length ? euros(c.total) : ''}</button>
+        ${E.datos.botones.filter(b => b.visible).map(b => `<button data-accion="${esc(b.accion)}" ${b.color ? `class="color" style="--bc:${esc(b.color)}"` : ''}
+          ${accionActiva(b.accion, c) ? '' : 'disabled'}>${esc(b.texto)}</button>`).join('')}
       </div>
+      <div class="fila-cobrar"><button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}>Cobrar ${c?.lineas.length ? euros(c.total) : ''}</button></div>
     </section>
     <section class="panel familias">
       ${familiasRaiz().map(f => `<button data-familia="${f.id}" style="--c:${esc(f.color)}" class="${f.id === E.familia || famActual?.padre_id === f.id ? 'activa' : ''}">${esc(f.nombre)}</button>`).join('')}
@@ -153,7 +156,8 @@ function numeroCalc() {
 }
 
 async function tecla(k) {
-  if (/^[0-9]$/.test(k)) { if (E.calc.length < 9) E.calc += k; }
+  if (/^[0-9]+$/.test(k)) { if (E.calc.length < 9) E.calc += k; }
+  else if (k === '⌫') E.calc = E.calc.slice(0, -1);
   else if (k === ',') { if (!E.calc.includes(',')) E.calc = (E.calc || '0') + ','; }
   else if (k === 'C') E.calc = '';
   else if (k === 'Un' || k === '€') {
@@ -164,21 +168,110 @@ async function tecla(k) {
     E.cuenta = await api('PATCH', `/lineas/${E.lineaSel}`, cambio);
     E.calc = '';
     return pintarVenta();
-  } else if (k === 'Det') {
-    if (!E.lineaSel) return aviso('Selecciona primero una línea de la cuenta', true);
-    const l = E.cuenta.lineas.find(x => x.id === E.lineaSel);
-    const texto = prompt('Detalle para cocina (ej.: sin sal, poco hecho)', l?.detalle ?? '');
-    if (texto === null) return;
-    E.cuenta = await api('PATCH', `/lineas/${E.lineaSel}`, { detalle: texto });
-    return pintarVenta();
-  } else if (k === 'Borrar') {
-    if (!E.lineaSel) return aviso('Selecciona primero una línea de la cuenta', true);
-    E.cuenta = await api('DELETE', `/lineas/${E.lineaSel}`);
-    E.lineaSel = null;
-    return pintarVenta();
   }
   $('#calc').textContent = E.calc;
 }
+
+// Botonera configurable: qué hace cada acción y cuándo está disponible.
+function accionActiva(accion, c) {
+  const conLineas = !!c?.lineas?.length;
+  switch (accion) {
+    case 'guardar': case 'comensales': case 'nombre': return !!c;
+    case 'preticket': case 'borrar_todo': case 'efectivo_exacto': case 'tarjeta': return conLineas;
+    case 'borrar_linea': case 'detalle': return conLineas && !!E.lineaSel;
+    default: return true;
+  }
+}
+
+async function borrarLinea(id) {
+  E.cuenta = await api('DELETE', `/lineas/${id}`);
+  if (E.lineaSel === id) E.lineaSel = null;
+  return pintarVenta();
+}
+
+async function cobroRapido(tipo) {
+  const fc = E.datos.formas_cobro.find(f => f.activa && f.tipo === tipo);
+  if (!fc) return aviso('No hay ninguna forma de cobro de ese tipo activa', true);
+  const ticket = await api('POST', `/cuentas/${E.cuenta.id}/cobrar`, { forma_cobro_id: fc.id });
+  E.cuenta = null;
+  E.lineaSel = null;
+  verTicket(ticket);
+  return pintarVenta();
+}
+
+async function accion(a) {
+  const c = E.cuenta;
+  switch (a) {
+    case 'guardar': return guardarCuenta();
+    case 'preticket': return verPreticket();
+    case 'nueva': E.cuenta = null; E.lineaSel = null; return pintarVenta();
+    case 'mesas': return ir('mesas');
+    case 'borrar_linea': return borrarLinea(E.lineaSel);
+    case 'borrar_todo':
+      if (!confirm('¿Borrar todas las líneas de la cuenta?')) return;
+      E.cuenta = await api('DELETE', `/cuentas/${c.id}/lineas`);
+      E.lineaSel = null;
+      return pintarVenta();
+    case 'detalle': {
+      const l = c.lineas.find(x => x.id === E.lineaSel);
+      const texto = prompt('Detalle para cocina (ej.: sin sal, poco hecho)', l?.detalle ?? '');
+      if (texto === null) return;
+      E.cuenta = await api('PATCH', `/lineas/${E.lineaSel}`, { detalle: texto });
+      return pintarVenta();
+    }
+    case 'comensales': {
+      const r = prompt('Número de comensales', String(c.comensales || ''));
+      if (r === null) return;
+      E.cuenta = await api('PATCH', `/cuentas/${c.id}`, { comensales: Number(r) || 0 });
+      return pintarVenta();
+    }
+    case 'nombre': {
+      const r = prompt('Nombre de la cuenta', c.nombre || '');
+      if (r === null) return;
+      E.cuenta = await api('PATCH', `/cuentas/${c.id}`, { nombre: r.trim() });
+      return pintarVenta();
+    }
+    case 'efectivo_exacto': return cobroRapido('efectivo');
+    case 'tarjeta': return cobroRapido('tarjeta');
+    case 'ultimo_ticket': {
+      const lista = await api('GET', '/tickets?todos=1');
+      if (!lista.length) return aviso('Todavía no hay tickets', true);
+      return verTicket(await api('GET', `/tickets/${lista[0].id}`));
+    }
+  }
+}
+
+// Deslizar una línea hacia la izquierda muestra el botón Anular.
+let arrastre = null;
+$('#vista').addEventListener('pointerdown', e => {
+  const l = e.target.closest('.linea');
+  if (!l || E.vista !== 'venta') return;
+  document.querySelectorAll('.linea.abierta').forEach(x => { if (x !== l) x.classList.remove('abierta'); });
+  arrastre = { el: l, x0: e.clientX, y0: e.clientY, dx: 0, base: l.classList.contains('abierta') ? -96 : 0, movido: false };
+});
+$('#vista').addEventListener('pointermove', e => {
+  if (!arrastre) return;
+  const dx = e.clientX - arrastre.x0;
+  if (!arrastre.movido && Math.abs(dx) < 8) return;
+  if (!arrastre.movido && Math.abs(e.clientY - arrastre.y0) > Math.abs(dx)) { arrastre = null; return; }
+  arrastre.movido = true;
+  arrastre.dx = dx;
+  arrastre.el.style.transition = 'none';
+  arrastre.el.style.transform = `translateX(${Math.max(-120, Math.min(0, arrastre.base + dx))}px)`;
+});
+const soltar = () => {
+  if (!arrastre) return;
+  const { el, base, dx, movido } = arrastre;
+  el.style.transition = '';
+  el.style.transform = '';
+  if (movido) {
+    el.classList.toggle('abierta', base + dx < -48);
+    el.dataset.arrastrado = '1';
+  }
+  arrastre = null;
+};
+$('#vista').addEventListener('pointerup', soltar);
+$('#vista').addEventListener('pointercancel', soltar);
 
 async function guardarCuenta() {
   const c = E.cuenta;
@@ -196,7 +289,7 @@ async function guardarCuenta() {
 
 $('#vista').addEventListener('click', e => intentar(async () => {
   if (E.vista !== 'venta') return;
-  const b = e.target.closest('[data-familia],[data-articulo],[data-cuenta],[data-tecla],[data-linea],button');
+  const b = e.target.closest('[data-familia],[data-articulo],[data-cuenta],[data-tecla],[data-anular],[data-linea],[data-accion],button');
   if (!b) return;
   if (b.dataset.familia) { E.familia = Number(b.dataset.familia); return pintarVenta(); }
   if (b.dataset.articulo) {
@@ -208,12 +301,19 @@ $('#vista').addEventListener('click', e => intentar(async () => {
     return pintarVenta();
   }
   if (b.dataset.cuenta) { E.cuenta = { id: Number(b.dataset.cuenta) }; E.lineaSel = null; return pintarVenta(); }
-  if (b.dataset.linea) { const id = Number(b.dataset.linea); E.lineaSel = E.lineaSel === id ? null : id; return pintarVenta(); }
+  if (b.dataset.anular) return borrarLinea(Number(b.dataset.anular));
+  if (b.dataset.linea) {
+    if (b.dataset.arrastrado) { delete b.dataset.arrastrado; return; }
+    if (b.classList.contains('abierta')) { b.classList.remove('abierta'); return; }
+    const id = Number(b.dataset.linea); E.lineaSel = E.lineaSel === id ? null : id; return pintarVenta();
+  }
+  if (b.dataset.accion) return accion(b.dataset.accion);
   if (b.dataset.tecla) return tecla(b.dataset.tecla);
-  if (b.id === 'b-teclado') { $('.venta').classList.toggle('ver-teclado'); return; }
-  if (b.id === 'b-guardar') return guardarCuenta();
-  if (b.id === 'b-nueva') { E.cuenta = null; E.lineaSel = null; return pintarVenta(); }
-  if (b.id === 'b-preticket') return verPreticket();
+  if (b.id === 'b-teclado') {
+    E.verTeclado = !E.verTeclado;
+    try { localStorage.setItem('verTeclado', E.verTeclado ? '1' : ''); } catch {}
+    return pintarVenta();
+  }
   if (b.id === 'b-cobrar') return abrirCobro();
 }));
 
@@ -437,6 +537,7 @@ const GESTION = {
   mesas: { titulo: 'Mesas', campos: [['nombre', 'Nombre'], ['zona_id', 'Zona', 'zonas'], ['x', 'Columna', 'num'], ['y', 'Fila', 'num']] },
   formas_cobro: { titulo: 'Formas de cobro', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipocobro'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   operarios: { titulo: 'Operarios', campos: [['nombre', 'Nombre'], ['pin', 'PIN']] },
+  botones: { titulo: 'Botonera', campos: [['texto', 'Texto'], ['accion', 'Acción', 'accion'], ['color', 'Color', 'colorop'], ['orden', 'Orden', 'num'], ['visible', 'Visible', 'bool']] },
 };
 const GRUPOS = [[-2, 'Ninguno'], [0, 'Entrantes'], [1, 'Primeros'], [2, 'Segundos'], [3, 'Postres']];
 const OPCIONES = {
@@ -450,6 +551,8 @@ function valorCelda(tipo, v) {
   if (tipo === 'grupo') return GRUPOS.find(g => g[0] === v)?.[1] ?? '';
   if (OPCIONES[tipo]) return OPCIONES[tipo].find(o => o[0] === v)?.[1] ?? v;
   if (['familias', 'departamentos', 'zonas'].includes(tipo)) return E.datos[tipo].find(x => x.id === v)?.nombre ?? '';
+  if (tipo === 'accion') return esc(E.datos.acciones[v] ?? v);
+  if (tipo === 'colorop') return v ? `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>` : 'Normal';
   if (tipo === 'color') return `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>`;
   return esc(v);
 }
@@ -457,7 +560,9 @@ function valorCelda(tipo, v) {
 function campoForm([k, etiqueta, tipo], fila) {
   const v = fila?.[k];
   if (tipo === 'bool') return `<label><span>${etiqueta}</span><select name="${k}"><option value="1" ${v !== 0 ? 'selected' : ''}>Sí</option><option value="0" ${v === 0 ? 'selected' : ''}>No</option></select></label>`;
-  const opts = tipo === 'grupo' ? GRUPOS : OPCIONES[tipo] ?? (['familias', 'departamentos', 'zonas'].includes(tipo) ? [['', '—'], ...E.datos[tipo].map(x => [x.id, x.nombre])] : null);
+  if (tipo === 'colorop') return `<label>${etiqueta}<span style="display:flex;gap:8px;align-items:center"><input type="color" name="${k}" value="${esc(v || '#0064fc')}" ${v ? '' : 'disabled'}>
+    <label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" name="${k}_normal" ${v ? '' : 'checked'} onchange="this.form.elements['${k}'].disabled=this.checked"> Sin color</label></span></label>`;
+  const opts = tipo === 'accion' ? Object.entries(E.datos.acciones) : tipo === 'grupo' ? GRUPOS : OPCIONES[tipo] ?? (['familias', 'departamentos', 'zonas'].includes(tipo) ? [['', '—'], ...E.datos[tipo].map(x => [x.id, x.nombre])] : null);
   if (opts) return `<label>${etiqueta}<select name="${k}">${opts.map(([val, txt]) => `<option value="${esc(val)}" ${String(val) === String(v ?? '') ? 'selected' : ''}>${esc(txt)}</option>`).join('')}</select></label>`;
   if (tipo === 'color') return `<label>${etiqueta}<input type="color" name="${k}" value="${esc(v ?? '#3d5a80')}"></label>`;
   if (tipo === 'euros') return `<label>${etiqueta}<input name="${k}" inputmode="decimal" value="${v !== undefined ? (v / 100).toFixed(2).replace('.', ',') : ''}"></label>`;
@@ -510,6 +615,7 @@ async function pintarGestion(editar) {
     for (const [k, , tipo] of def.campos) {
       const v = form.elements[k].value;
       if (tipo === 'euros') datos[k] = Math.round(Number(v.replace(',', '.')) * 100);
+      else if (tipo === 'colorop') datos[k] = form.elements[k + '_normal'].checked ? '' : v;
       else if (['num', 'grupo', 'bool'].includes(tipo)) datos[k] = Number(String(v).replace(',', '.'));
       else if (['familias', 'departamentos', 'zonas'].includes(tipo)) datos[k] = v === '' ? null : Number(v);
       else datos[k] = v;

@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS cierres (
   resumen TEXT NOT NULL
 );
 
+-- Botonera de funciones de la pantalla de venta (configurable desde Gestión).
+CREATE TABLE IF NOT EXISTS botones (
+  id INTEGER PRIMARY KEY,
+  accion TEXT NOT NULL,
+  texto TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '',
+  orden INTEGER NOT NULL DEFAULT 0,
+  visible INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS empresa (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   nombre TEXT NOT NULL DEFAULT 'Mi local',
@@ -138,7 +148,36 @@ export function openDb(file: string): DB {
   db.exec(SCHEMA);
   const vacia = db.prepare('SELECT COUNT(*) AS n FROM empresa').get() as { n: number };
   if (vacia.n === 0) seed(db);
+  const sinBotones = db.prepare('SELECT COUNT(*) AS n FROM botones').get() as { n: number };
+  if (sinBotones.n === 0) seedBotones(db);
   return db;
+}
+
+// Acciones que puede tener un botón de la botonera.
+export const ACCIONES: Record<string, string> = {
+  guardar: 'Guardar cuenta',
+  preticket: 'Pre-ticket',
+  nueva: 'Nueva cuenta',
+  mesas: 'Ir a mesas',
+  borrar_linea: 'Borrar línea',
+  borrar_todo: 'Borrar todo',
+  detalle: 'Detalle para cocina',
+  comensales: 'Cambiar comensales',
+  nombre: 'Nombre de la cuenta',
+  efectivo_exacto: 'Cobro rápido en efectivo (importe exacto)',
+  tarjeta: 'Cobro rápido con tarjeta',
+  ultimo_ticket: 'Ver último ticket',
+};
+
+function seedBotones(db: DB) {
+  const b = db.prepare('INSERT INTO botones (accion, texto, color, orden, visible) VALUES (?, ?, ?, ?, ?)');
+  const lista: [string, string, string, number][] = [
+    ['guardar', 'Guardar', '', 1], ['preticket', 'Pre-ticket', '', 1], ['nueva', 'Nueva', '', 1],
+    ['borrar_linea', 'Borrar línea', '#c8443a', 1], ['borrar_todo', 'Borrar todo', '#c8443a', 1], ['detalle', 'Detalle', '', 1],
+    ['mesas', 'Mesas', '', 1], ['comensales', 'Comensales', '', 1], ['nombre', 'Nombre', '', 1],
+    ['efectivo_exacto', 'Efectivo exacto', '#2e9d4f', 1], ['tarjeta', 'Tarjeta', '#0064fc', 1], ['ultimo_ticket', 'Último ticket', '', 1],
+  ];
+  tx(db, () => lista.forEach(([accion, texto, color, visible], i) => b.run(accion, texto, color, i + 1, visible)));
 }
 
 export function tx<T>(db: DB, fn: () => T): T {

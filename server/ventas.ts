@@ -102,6 +102,12 @@ export function borrarLinea(db: DB, lineaId: number) {
   return getCuenta(db, l.cuenta_id);
 }
 
+export function borrarTodasLineas(db: DB, cuentaId: number) {
+  cuentaAbierta(db, cuentaId);
+  db.prepare('DELETE FROM lineas WHERE cuenta_id = ?').run(cuentaId);
+  return getCuenta(db, cuentaId);
+}
+
 // Huella encadenada: cada ticket incluye la huella del anterior, así no se puede
 // borrar ni cambiar un ticket sin que se note. El formato definitivo lo fijará
 // TicketBAI/Verifactu en la fase 4.

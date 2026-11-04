@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DB } from './db.ts';
+import { type DB, ACCIONES } from './db.ts';
 import * as v from './ventas.ts';
 import * as g from './gestion.ts';
 
@@ -36,12 +36,15 @@ ruta('GET', '/api/inicio', ({ db }) => ({
   zonas: g.listar(db, 'zonas'),
   mesas: g.listar(db, 'mesas'),
   formas_cobro: g.listar(db, 'formas_cobro'),
+  botones: g.listar(db, 'botones'),
+  acciones: ACCIONES,
 }));
 
 ruta('GET', '/api/cuentas', ({ db }) => v.cuentasAbiertas(db));
 ruta('POST', '/api/cuentas', ({ db, body }) => v.abrirCuenta(db, body));
 ruta('GET', '/api/cuentas/:id', ({ db, params }) => v.getCuenta(db, num(params[0])));
 ruta('PATCH', '/api/cuentas/:id', ({ db, params, body }) => v.actualizarCuenta(db, num(params[0]), body));
+ruta('DELETE', '/api/cuentas/:id/lineas', ({ db, params }) => v.borrarTodasLineas(db, num(params[0])));
 ruta('POST', '/api/cuentas/:id/lineas', ({ db, params, body }) => v.anadirLinea(db, num(params[0]), body));
 ruta('POST', '/api/cuentas/:id/cobrar', ({ db, params, body }) => v.cobrarCuenta(db, num(params[0]), body));
 ruta('PATCH', '/api/lineas/:id', ({ db, params, body }) => v.modificarLinea(db, num(params[0]), body));

@@ -116,3 +116,25 @@ test('desglose de IVA con varios tipos', () => {
     { iva: 21, base: 1000, cuota: 210, total: 1210 },
   ]);
 });
+
+test('borrar todas las líneas y botonera configurable', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    assert.ok(ini.botones.length >= 10);
+    assert.ok(ini.acciones.borrar_todo);
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[0].id });
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[1].id });
+    const vacia = (await api('DELETE', `/cuentas/${c.id}/lineas`)).data;
+    assert.equal(vacia.lineas.length, 0);
+    assert.equal(vacia.total, 0);
+
+    const b = ini.botones.find((x: any) => x.accion === 'nombre');
+    const cambiado = (await api('PUT', `/gestion/botones/${b.id}`, { texto: 'Poner nombre', visible: false, color: '#ff0000' })).data;
+    assert.equal(cambiado.texto, 'Poner nombre');
+    assert.equal(cambiado.visible, 0);
+    assert.equal((await api('POST', '/gestion/botones', { accion: 'abrir_cajas_fuertes', texto: 'x' })).status, 400);
+  } finally { await cerrar(); }
+});

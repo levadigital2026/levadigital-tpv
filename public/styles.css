@@ -47,19 +47,29 @@ main { flex: 1; min-height: 0; }
 .cuenta-cab b { font-size: 17px; }
 .cuenta-cab small { color: var(--suave); display: block; }
 .lineas { flex: 1; overflow-y: auto; }
-.linea { display: grid; grid-template-columns: 44px 1fr auto; gap: 8px; padding: 9px 12px; border-bottom: 1px solid #eef1f4; align-items: start; }
+.linea-caja { position: relative; overflow: hidden; border-bottom: 1px solid #eef1f4; }
+.linea-anular { position: absolute; right: 0; top: 0; bottom: 0; width: 96px; border: 0; border-radius: 0; background: var(--peligro); color: #fff; font-weight: 700; }
+.linea { position: relative; background: var(--panel); transition: transform .18s ease; touch-action: pan-y; }
+.linea.abierta { transform: translateX(-96px); }
+.linea { display: grid; grid-template-columns: 44px 1fr auto; gap: 8px; padding: 9px 12px; align-items: start; }
 .linea.sel { background: var(--sel); }
 .linea .uds { font-weight: 600; text-align: right; }
 .linea .det { grid-column: 2 / 4; color: var(--suave); font-size: 13px; margin-top: -4px; }
 .vacio { color: var(--suave); padding: 24px 12px; text-align: center; }
 .total { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; border-top: 1px solid var(--borde); }
 .total span:last-child { font-size: 30px; font-weight: 700; }
+.venta .cuenta .teclado { display: none; }
+.venta.ver-teclado .cuenta .teclado { display: grid; }
+#b-teclado { padding: 6px 10px; font-weight: 600; }
+#b-teclado.activo { background: var(--marca); color: #fff; border-color: var(--marca); }
 .teclado { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px; border-top: 1px solid var(--borde); }
 .teclado button { padding: 12px 0; font-size: 18px; font-weight: 600; }
 .teclado .pantalla { grid-column: 1 / 5; text-align: right; font-size: 20px; padding: 6px 10px; background: #f1f4f7; border-radius: 8px; min-height: 38px; font-variant-numeric: tabular-nums; }
 .acciones { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 8px 8px; }
-.acciones button { padding: 12px 4px; font-weight: 600; }
-.acciones .cobrar { grid-column: 1 / 4; background: var(--cobrar); color: #fff; border-color: var(--cobrar); font-size: 20px; padding: 14px; }
+.acciones button { padding: 10px 4px; font-weight: 600; font-size: 14px; }
+.acciones button.color { background: var(--bc); border-color: var(--bc); color: #fff; }
+.fila-cobrar { padding: 0 8px 8px; }
+.cobrar { width: 100%; background: var(--cobrar); color: #fff; border-color: var(--cobrar); font-size: 20px; font-weight: 600; padding: 14px; }
 .peligro { color: var(--peligro); }
 
 .familias { overflow-y: auto; padding: 8px; gap: 6px; display: flex; flex-direction: column; }
@@ -143,8 +153,8 @@ tr.anulado td { color: var(--suave); text-decoration: line-through; }
   .venta .familias button { white-space: nowrap; padding: 12px; border-left-width: 0; border-bottom: 5px solid var(--c, var(--azul)); }
   .venta .articulos { flex: 1; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
   .venta .cuenta { order: 3; flex: none; max-height: 45%; }
-  .venta .cuenta .teclado { display: none; }
-  .venta.ver-teclado .cuenta .teclado { display: grid; }
+  .venta .acciones { display: flex; overflow-x: auto; }
+  .venta .acciones button { flex: none; padding: 10px 12px; }
   .dos-col, .cobro { grid-template-columns: 1fr; }
 }
 @media print {
