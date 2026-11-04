@@ -165,12 +165,23 @@ function nombreCuenta(c) {
 
 // ---------- Navegación ----------
 const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados, cierres: pintarCierres };
+// Pantallas que cuelgan de Configuración (el botón de herramientas del menú queda marcado).
+const VISTAS_CONFIG = new Set(['config', 'gestion', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres']);
 function ir(vista) {
   E.vista = vista;
-  document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
+  const marcada = VISTAS_CONFIG.has(vista) ? 'config' : vista;
+  document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === marcada));
   return VISTAS[vista]();
 }
-$('#menu').addEventListener('click', e => { const b = e.target.closest('button'); if (b) intentar(() => ir(b.dataset.vista)); });
+$('#menu').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.vista === 'config') {
+    if (!tienePermiso('configuracion')) return aviso('Tu operario no tiene permiso para entrar en configuración', true);
+    E.seccionConfig = null;
+  }
+  intentar(() => ir(b.dataset.vista));
+});
 
 // ---------- Venta ----------
 async function pintarVenta() {
@@ -257,6 +268,7 @@ async function tecla(k) {
 }
 
 const ICONO_HERRAMIENTAS = `<svg viewBox="0 0 24 24" width="22" height="22" aria-label="Configuración" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>`;
+$('.menu-config').innerHTML = ICONO_HERRAMIENTAS;
 
 // Botonera configurable: qué hace cada acción y cuándo está disponible.
 function accionActiva(accion, c) {
@@ -1079,7 +1091,7 @@ async function pintarEmpresa() {
 
 // ---------- Configuración ----------
 function cabeceraConfig(titulo) {
-  return `<div class="cab-config"><button data-volver="1">← Configuración</button><h2>${esc(titulo)}</h2></div>`;
+  return `<div class="cab-config"><button data-volver="1">← ${esc(E.seccionConfig || 'Configuración')}</button><h2>${esc(titulo)}</h2></div>`;
 }
 
 const SECCIONES_CONFIG = [
@@ -1119,14 +1131,32 @@ const SECCIONES_CONFIG = [
   ]],
 ];
 
+// Configuración: primero los grupos (Informes, Carta...) y dentro de cada uno sus pantallas.
+const ICONOS_SECCION = {
+  Informes: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  Carta: '<path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"/><path d="M8 9h8M8 13h8"/>',
+  Local: '<path d="M3 10l9-6 9 6v10H3z"/><path d="M9 20v-6h6v6"/>',
+  'Cobros e impuestos': '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  Personalización: '<circle cx="12" cy="12" r="9"/><circle cx="8" cy="10" r="1.5"/><circle cx="12" cy="7.5" r="1.5"/><circle cx="16" cy="10" r="1.5"/><path d="M12 21a3 3 0 0 1 0-6h3"/>',
+};
+const iconoSeccion = t => `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONOS_SECCION[t] ?? ''}</svg>`;
+
 function pintarConfig() {
-  $('#vista').innerHTML = `<div class="config scroll">
-    <h2>${ICONO_HERRAMIENTAS} Configuración</h2>
-    ${SECCIONES_CONFIG.map(([titulo, items]) => `<h3>${titulo}</h3><div class="baldosas">
-      ${items.map(([k, t, d]) => `<button data-ir="${k}"><b>${t}</b><span>${d}</span></button>`).join('')}
-    </div>`).join('')}
-  </div>`;
+  const sec = SECCIONES_CONFIG.find(([t]) => t === E.seccionConfig);
+  $('#vista').innerHTML = sec
+    ? `<div class="config scroll">
+        <div class="cab-config"><button data-secciones="1">← Configuración</button><h2>${iconoSeccion(sec[0])} ${esc(sec[0])}</h2></div>
+        <div class="baldosas" style="margin-top:14px">${sec[1].map(([k, t, d]) => `<button data-ir="${k}"><b>${t}</b><span>${d}</span></button>`).join('')}</div>
+      </div>`
+    : `<div class="config scroll">
+        <h2>${ICONO_HERRAMIENTAS} Configuración</h2>
+        <div class="secciones-config">${SECCIONES_CONFIG.map(([t, items]) => `<button data-seccion="${esc(t)}">${iconoSeccion(t)}<b>${esc(t)}</b>
+          <span>${items.map(i => esc(i[1])).join(' · ')}</span></button>`).join('')}</div>
+      </div>`;
   $('#vista').onclick = e => intentar(async () => {
+    const s = e.target.closest('[data-seccion]');
+    if (s) { E.seccionConfig = s.dataset.seccion; return pintarConfig(); }
+    if (e.target.closest('[data-secciones]')) { E.seccionConfig = null; return pintarConfig(); }
     const b = e.target.closest('[data-ir]');
     if (!b) return;
     const k = b.dataset.ir;

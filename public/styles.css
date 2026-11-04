@@ -347,3 +347,12 @@ td small { color: var(--suave); }
 .bloques-caja { padding: 0 12px 12px; }
 .bloques-caja h3 { margin-top: 18px; }
 @media (max-width: 760px) { .dos-col.caja { grid-template-columns: 1fr; } }
+
+/* Configuración: botón del menú y grupos */
+.menu .menu-config { display: inline-flex; align-items: center; justify-content: center; padding: 6px 12px; }
+.secciones-config { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 16px; }
+.secciones-config button { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; padding: 22px; min-height: 150px; border-left: 6px solid var(--marca); }
+.secciones-config button svg { color: var(--marca); }
+.secciones-config button b { font-size: 22px; text-transform: uppercase; letter-spacing: .5px; }
+.secciones-config button span { color: var(--suave); font-size: 13px; line-height: 1.4; }
+.cab-config h2 svg { vertical-align: middle; color: var(--marca); }

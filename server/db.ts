@@ -340,9 +340,10 @@ function migrar(db: DB) {
       [['orden_plato', 'Orden de comanda', '#7c3aed'], ['marchar', 'Marchar cocina', '#e85d04'], ['comanda', 'Ver comanda', '']]
         .forEach(([a, t, c], i) => { if (!db.prepare('SELECT 1 FROM botones WHERE accion = ?').get(a)) b.run(a, t, c, max + i + 1); });
     });
-    if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'configuracion'").get()) {
-      db.prepare("INSERT INTO botones (accion, texto, color, orden, visible) VALUES ('configuracion', 'Configuración', '#0b1527', 0, 1)").run();
-    }
+    // La configuración se abre desde el botón de herramientas del menú de arriba: ya no va en la botonera.
+    unaVez('configuracion_en_menu', () => {
+      db.prepare("DELETE FROM botones WHERE accion = 'configuracion'").run();
+    });
     if (cuenta(db, 'ivas') === 0) {
       const i = db.prepare('INSERT INTO ivas (nombre, codigo, porcentaje, recargo, orden) VALUES (?, ?, ?, ?, ?)');
       i.run('Superreducido', 'S', 4, 0.5, 1);
@@ -367,7 +368,6 @@ function migrar(db: DB) {
 
 // Acciones que puede tener un botón de la botonera.
 export const ACCIONES: Record<string, string> = {
-  configuracion: 'Configuración (herramientas)',
   guardar: 'Guardar cuenta',
   preticket: 'Pre-ticket',
   nueva: 'Nueva cuenta',

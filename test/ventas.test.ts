@@ -142,15 +142,12 @@ test('borrar todas las líneas y botonera configurable', async () => {
   } finally { await cerrar(); }
 });
 
-test('configuración: el botón de herramientas no se puede quitar y existen las nuevas tablas', async () => {
+test('configuración: va en el menú de arriba (no en la botonera) y existen las nuevas tablas', async () => {
   const { api, cerrar } = await arrancar();
   try {
     const ini = (await api('GET', '/inicio')).data;
-    const conf = ini.botones.find((b: any) => b.accion === 'configuracion');
-    assert.ok(conf);
-    assert.equal((await api('PUT', `/gestion/botones/${conf.id}`, { visible: false })).status, 400);
-    assert.equal((await api('DELETE', `/gestion/botones/${conf.id}`)).status, 400);
-    assert.equal((await api('PUT', `/gestion/botones/${conf.id}`, { color: '#000000' })).status, 200);
+    assert.ok(!ini.botones.some((b: any) => b.accion === 'configuracion'));
+    assert.equal((await api('POST', '/gestion/botones', { accion: 'configuracion', texto: 'x' })).status, 400);
     assert.equal((await api('GET', '/gestion/ivas')).data.length, 3);
     assert.equal((await api('GET', '/gestion/puestos')).data.length, 1);
     assert.ok((await api('GET', '/gestion/conceptos_pago')).data.length > 0);

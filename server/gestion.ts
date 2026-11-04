@@ -151,16 +151,6 @@ export function crear(db: DB, tabla: string, datos: Record<string, unknown>) {
   return db.prepare(`SELECT * FROM ${tabla} WHERE id = ?`).get(Number(r.lastInsertRowid));
 }
 
-// El botón de configuración es la única entrada a la configuración: no se puede ocultar ni borrar.
-function protegerConfiguracion(db: DB, tabla: string, id: number, v?: Record<string, unknown>) {
-  if (tabla !== 'botones') return;
-  const b = db.prepare('SELECT accion FROM botones WHERE id = ?').get(id) as { accion: string } | undefined;
-  if (b?.accion !== 'configuracion') return;
-  if (!v || v.visible === 0 || (v.accion !== undefined && v.accion !== 'configuracion')) {
-    throw new ErrorTPV('El botón de configuración no se puede quitar, porque es la entrada a la configuración');
-  }
-}
-
 // Una familia no puede ser subfamilia de sí misma ni de una de sus subfamilias.
 function evitarCiclo(db: DB, id: number, padreId: number) {
   const padreDe = db.prepare('SELECT padre_id FROM familias WHERE id = ?');
@@ -173,7 +163,6 @@ function evitarCiclo(db: DB, id: number, padreId: number) {
 export function actualizar(db: DB, tabla: string, id: number, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, false);
-  protegerConfiguracion(db, tabla, id, v);
   rfidLibre(db, tabla, v, id);
   if (tabla === 'familias' && v.padre_id != null) evitarCiclo(db, id, Number(v.padre_id));
   const cols = Object.keys(v);
@@ -224,7 +213,6 @@ export async function imagenesAutomaticas(db: DB, datos: { todos?: boolean }) {
 
 export function borrar(db: DB, tabla: string, id: number) {
   comprobarTabla(tabla);
-  protegerConfiguracion(db, tabla, id);
   if (tabla === 'articulos') {
     // Un artículo ya vendido no se borra: se desactiva para conservar el histórico.
     const usado = db.prepare('SELECT 1 FROM lineas WHERE articulo_id = ? UNION SELECT 1 FROM ticket_lineas WHERE articulo_id = ?').get(id, id);
