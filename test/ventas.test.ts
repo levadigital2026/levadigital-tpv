@@ -230,9 +230,12 @@ test('aspecto: se guarda, se valida y vuelve en /inicio', async () => {
   const { api, cerrar } = await arrancar();
   try {
     let ini = (await api('GET', '/inicio')).data;
-    assert.equal(ini.aspecto.botonera_cols, 3);
-    const a = (await api('PUT', '/aspecto', { botonera_cols: 2, familias_px: 300, color_principal: '#FF0000' })).data;
-    assert.equal(a.botonera_cols, 2);
+    assert.equal(ini.aspecto.botonera_cols, 2);
+    assert.equal(ini.aspecto.mano, 'derecha');
+    const a = (await api('PUT', '/aspecto', { botonera_cols: 3, familias_px: 300, color_principal: '#FF0000', mano: 'izquierda' })).data;
+    assert.equal(a.botonera_cols, 3);
+    assert.equal(a.mano, 'izquierda');
+    assert.equal((await api('PUT', '/aspecto', { mano: 'centro' })).status, 400);
     assert.equal(a.color_principal, '#ff0000');
     assert.equal((await api('PUT', '/aspecto', { botonera_cols: 9 })).status, 400);
     assert.equal((await api('PUT', '/aspecto', { color_cobrar: 'red' })).status, 400);

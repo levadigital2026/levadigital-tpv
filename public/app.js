@@ -94,7 +94,8 @@ function aplicarAspecto(a, raiz = document.documentElement) {
   if (!a || !E.datos?.aspecto_campos) return;
   for (const [k, def] of Object.entries(E.datos.aspecto_campos)) {
     if (a[k] === undefined) continue;
-    if (COLORES_ASPECTO[k]) raiz.style.setProperty(COLORES_ASPECTO[k], a[k]);
+    if (def[2] === 'lado') raiz.dataset.mano = a[k];
+    else if (COLORES_ASPECTO[k]) raiz.style.setProperty(COLORES_ASPECTO[k], a[k]);
     else raiz.style.setProperty(`--a-${k}`, a[k] + def[6]);
   }
 }
@@ -215,17 +216,12 @@ async function pintarVenta() {
             </div>
           </div>`).join('') : '<div class="vacio">Sin artículos</div>'}
       </div>
-      <div class="total"><span>Total</span><span>${euros(c?.total ?? 0)}</span></div>
+      <div class="total"><span>Total${c?.lineas.length ? ` · ${uds(c.lineas.reduce((n, l) => n + l.unidades, 0))} uds.` : ''}</span><span>${euros(c?.total ?? 0)}</span></div>
       <div class="teclado">
         <div class="pantalla" id="calc">${esc(E.calc)}</div>
         ${['7', '8', '9', 'C', '4', '5', '6', 'Un', '1', '2', '3', '€', '0', ',', '00', '⌫'].map(k =>
           `<button data-tecla="${k}">${k}</button>`).join('')}
       </div>
-      <div class="acciones">
-        ${E.datos.botones.filter(b => b.visible).map(b => `<button data-accion="${esc(b.accion)}" data-id="${b.id}" ${b.color ? `class="color" style="--bc:${esc(b.color)}"` : ''}
-          ${accionActiva(b.accion, c) ? '' : 'disabled'} title="${esc(b.texto)}">${b.accion === 'configuracion' ? ICONO_HERRAMIENTAS : esc(b.texto)}</button>`).join('')}
-      </div>
-      <div class="fila-cobrar"><button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}>Cobrar ${c?.lineas.length ? euros(c.total) : ''}</button></div>
     </section>
     <section class="panel familias">
       ${columnaFamilias()}
@@ -234,6 +230,13 @@ async function pintarVenta() {
       ${arts.length ? '' : subfamilias.map(f => botonArticulo(f, f.color, 'Subfamilia', `data-familia="${f.id}"`)).join('')}
       ${arts.map(a => botonArticulo(a, colorDe(a.familia_id), euros(a.precio))).join('')}
       ${!arts.length && !subfamilias.length ? `<div class="vacio">${famActual ? 'Esta familia no tiene artículos' : 'No hay familias'}</div>` : ''}
+    </section>
+    <section class="panel mando">
+      <div class="acciones">
+        ${E.datos.botones.filter(b => b.visible && b.accion !== 'configuracion').map(b => `<button data-accion="${esc(b.accion)}" data-id="${b.id}" ${b.color ? `class="color" style="--bc:${esc(b.color)}"` : ''}
+          ${accionActiva(b.accion, c) ? '' : 'disabled'} title="${esc(b.texto)}">${esc(b.texto)}</button>`).join('')}
+      </div>
+      <button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}><small>COBRAR</small><b>${euros(c?.total ?? 0)}</b></button>
     </section>
   </div>`;
 }
@@ -1659,7 +1662,11 @@ function pintarAspecto() {
   const campos = Object.entries(E.datos.aspecto_campos);
   const val = { ...E.datos.aspecto };
   const grupos = [...new Set(campos.map(([, d]) => d[0]))];
-  const control = ([k, [, etiqueta, tipo, min, max, , unidad]]) => tipo === 'color'
+  const marcarLado = () => $('#ajustes').querySelectorAll('[data-lado]').forEach(b => b.classList.toggle('activo', b.dataset.lado === b.closest('.ajuste').querySelector('input').value));
+  const control = ([k, [, etiqueta, tipo, min, max, , unidad]]) => tipo === 'lado'
+    ? `<div class="ajuste"><span>${esc(etiqueta)}</span><input type="hidden" name="${k}" value="${esc(val[k])}">
+        <div class="lado"><button type="button" data-lado="izquierda">Izquierda (zurdos)</button><button type="button" data-lado="derecha">Derecha (diestros)</button></div></div>`
+    : tipo === 'color'
     ? `<div class="ajuste"><span>${esc(etiqueta)}</span>${campoColor(k, val[k], false)}</div>`
     : `<label class="ajuste"><span>${esc(etiqueta)}</span><output id="o-${k}">${val[k]}${unidad}</output>
         <input type="range" name="${k}" min="${min}" max="${max}" step="1" value="${val[k]}"></label>`;
@@ -1690,11 +1697,15 @@ function pintarAspecto() {
     aPrevia();
   };
   $('#ajustes').oninput = leer;
+  marcarLado();
   $('#vista').onclick = e => intentar(async () => {
     if (e.target.closest('[data-volver]')) return ir('config');
+    const lado = e.target.closest('[data-lado]');
+    if (lado) { lado.closest('.ajuste').querySelector('input').value = lado.dataset.lado; marcarLado(); return leer(); }
     if (e.target.closest('[data-defecto]')) {
       for (const el of $('#ajustes').querySelectorAll('input')) el.value = E.datos.aspecto_campos[el.name][5];
       $('#ajustes').querySelectorAll('.selector-color').forEach(refrescarMuestra);
+      marcarLado();
       return leer();
     }
     if (e.target.closest('[data-guardar]')) {

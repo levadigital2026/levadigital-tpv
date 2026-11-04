@@ -45,7 +45,17 @@ input, select { font: inherit; padding: 8px 10px; border: 1px solid var(--borde)
 main { flex: 1; min-height: 0; }
 
 /* Pantalla de venta */
-.venta { display: grid; grid-template-columns: minmax(240px, var(--a-cuenta_pct, 30%)) var(--a-familias_px, 230px) 1fr; gap: 10px; padding: 10px; height: 100%; }
+.venta { display: grid; grid-template-columns: minmax(220px, var(--a-cuenta_pct, 26%)) var(--a-familias_px, 210px) minmax(0, 1fr) var(--a-botonera_px, 250px); gap: 10px; padding: 10px; height: 100%; }
+/* Botonera y Cobrar a mano: a la derecha (diestros) o a la izquierda (zurdos), la pantalla se da la vuelta. */
+[data-mano="izquierda"] .venta { direction: rtl; }
+[data-mano="izquierda"] .venta > * { direction: ltr; }
+.mando { padding: 8px; gap: 8px; }
+.mando .acciones { flex: 1; min-height: 0; overflow-y: auto; padding: 0; grid-auto-rows: minmax(var(--a-botonera_alto, 40px), 1fr); align-content: stretch; }
+.mando .acciones button { min-height: 0; }
+.mando .cobrar { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 96px; padding: 10px; border-radius: 14px; box-shadow: 0 6px 18px color-mix(in srgb, var(--cobrar) 35%, transparent); }
+.mando .cobrar small { font-size: 15px; font-weight: 700; letter-spacing: 2px; opacity: .9; }
+.mando .cobrar b { font-size: 30px; font-variant-numeric: tabular-nums; }
+.mando .cobrar:disabled { box-shadow: none; }
 .panel { background: var(--panel); border: 1px solid var(--borde); border-radius: var(--radio); display: flex; flex-direction: column; min-height: 0; }
 .cuenta-cab { padding: 10px 12px; border-bottom: 1px solid var(--borde); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .cuenta-cab b { font-size: 17px; }
@@ -80,7 +90,7 @@ main { flex: 1; min-height: 0; }
 .familias { overflow-y: auto; padding: 8px; gap: 6px; display: flex; flex-direction: column; }
 .familias button { padding: 8px 12px; min-height: var(--a-familias_alto, 60px); font-size: var(--a-familias_letra, 17px); font-weight: 600; text-align: left; border-left: 6px solid var(--c, var(--azul)); }
 .familias button.activa { background: var(--marca); color: #fff; border-color: var(--marca); }
-.familias button { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: none; }
+.familias button { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: none; overflow: hidden; }
 .familias button i { font-style: normal; font-size: 22px; line-height: 1; opacity: .7; }
 .familias .volver-fam { background: var(--azul); color: #fff; border-color: var(--azul); border-left-color: var(--azul); }
 .familias .sub-fam { padding-left: 14px; display: flex; flex-direction: column; flex: none; }
@@ -99,7 +109,7 @@ main { flex: 1; min-height: 0; }
 button.con-fondo { background: var(--bf); }
 button.con-texto, .articulos button.con-texto span, .familias button.con-texto span { color: var(--bt); }
 .familias button .mini { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; flex: none; }
-.familias button .nom { flex: 1; }
+.familias button .nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; overflow-wrap: break-word; hyphens: auto; }
 img.mini-tabla { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; display: block; }
 .campo-imagen { display: grid; gap: 6px; font-size: 13px; color: var(--suave); }
 .vista-imagen { width: 140px; height: 110px; border: 1px dashed var(--borde); border-radius: var(--radio); display: grid; place-items: center; overflow: hidden; cursor: pointer; background: #fff; }
@@ -299,9 +309,6 @@ td small { color: var(--suave); }
   .banco-carpetas { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--borde); }
   .banco-carpetas button { white-space: nowrap; }
 }
-@media (max-width: 1100px) {
-  .venta { grid-template-columns: minmax(240px, max(var(--a-cuenta_pct, 30%), 34%)) min(var(--a-familias_px, 230px), 180px) 1fr; }
-}
 @media (max-width: 760px) {
   .barra-sup { flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
   .estado #local { display: none; }
@@ -311,7 +318,11 @@ td small { color: var(--suave); }
   .venta .familias .sub-fam { padding-left: 0; }
   .venta .familias button { white-space: nowrap; padding: 12px; border-left-width: 0; border-bottom: 5px solid var(--c, var(--azul)); }
   .venta .articulos { flex: 1; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
-  .venta .cuenta { order: 3; flex: none; max-height: 45%; }
+  .venta .cuenta { order: 3; flex: none; max-height: 40%; }
+  .venta .mando { order: 4; flex: none; }
+  .mando .acciones { flex: none; grid-auto-rows: auto; }
+  .mando .cobrar { min-height: 56px; flex-direction: row; gap: 10px; }
+  .mando .cobrar b { font-size: 22px; }
   .venta .acciones { display: flex; overflow-x: auto; }
   .venta .acciones button { flex: none; padding: 10px 12px; }
   .dos-col, .cobro { grid-template-columns: 1fr; }
@@ -356,3 +367,7 @@ td small { color: var(--suave); }
 .secciones-config button b { font-size: 22px; text-transform: uppercase; letter-spacing: .5px; }
 .secciones-config button span { color: var(--suave); font-size: 13px; line-height: 1.4; }
 .cab-config h2 svg { vertical-align: middle; color: var(--marca); }
+
+.ajuste .lado { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ajuste .lado button { padding: 8px; font-weight: 600; }
+.ajuste .lado button.activo { background: var(--marca); border-color: var(--marca); color: #fff; }

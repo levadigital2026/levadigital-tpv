@@ -231,10 +231,12 @@ export function borrar(db: DB, tabla: string, id: number) {
 
 // Aspecto de la pantalla de venta: tamaños de zonas y botones, y colores.
 // [grupo, etiqueta, tipo, mínimo, máximo, por defecto, unidad]
-export const ASPECTO: Record<string, [string, string, 'num' | 'color', number, number, number | string, string]> = {
-  cuenta_pct: ['Zonas de la pantalla', 'Ancho de la cuenta y botonera', 'num', 20, 50, 30, '%'],
-  familias_px: ['Zonas de la pantalla', 'Ancho de la columna de familias', 'num', 120, 420, 230, 'px'],
-  botonera_cols: ['Botonera', 'Botones por fila', 'num', 1, 6, 3, ''],
+export const ASPECTO: Record<string, [string, string, 'num' | 'color' | 'lado', number, number, number | string, string]> = {
+  mano: ['Zonas de la pantalla', 'Botonera y Cobrar en el lado', 'lado', 0, 0, 'derecha', ''],
+  cuenta_pct: ['Zonas de la pantalla', 'Ancho de la cuenta', 'num', 18, 45, 26, '%'],
+  familias_px: ['Zonas de la pantalla', 'Ancho de la columna de familias', 'num', 120, 420, 210, 'px'],
+  botonera_px: ['Zonas de la pantalla', 'Ancho de la botonera', 'num', 160, 460, 250, 'px'],
+  botonera_cols: ['Botonera', 'Botones por fila', 'num', 1, 6, 2, ''],
   botonera_alto: ['Botonera', 'Alto de los botones', 'num', 30, 100, 40, 'px'],
   botonera_letra: ['Botonera', 'Tamaño de letra', 'num', 10, 24, 14, 'px'],
   familias_alto: ['Familias', 'Alto de los botones', 'num', 36, 120, 60, 'px'],
@@ -255,6 +257,7 @@ export function getAspecto(db: DB) {
   for (const [k, [, , tipo, min, max, def]] of Object.entries(ASPECTO)) {
     const v = guardado[k];
     if (tipo === 'num') out[k] = typeof v === 'number' && v >= min && v <= max ? v : (def as number);
+    else if (tipo === 'lado') out[k] = v === 'izquierda' ? 'izquierda' : 'derecha';
     else out[k] = typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : (def as string);
   }
   return out;
@@ -270,6 +273,9 @@ export function setAspecto(db: DB, datos: Record<string, unknown>) {
       const n = Number(v);
       if (!Number.isFinite(n) || n < min || n > max) throw new ErrorTPV(`${etiqueta}: debe estar entre ${min} y ${max}`);
       out[k] = Math.round(n);
+    } else if (tipo === 'lado') {
+      if (v !== 'derecha' && v !== 'izquierda') throw new ErrorTPV(`${etiqueta}: elige derecha o izquierda`);
+      out[k] = v;
     } else {
       if (typeof v !== 'string' || !/^#[0-9a-f]{6}$/i.test(v)) throw new ErrorTPV(`${etiqueta}: color no válido`);
       out[k] = v.toLowerCase();
