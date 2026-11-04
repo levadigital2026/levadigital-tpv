@@ -697,11 +697,9 @@ function campoForm([k, etiqueta, tipo], fila) {
   if (tipo === 'imagen') return `<div class="campo-imagen"><span>${etiqueta}</span><input type="hidden" name="${k}" value="${esc(v ?? '')}">
     <div class="vista-imagen" data-elegir-imagen="${k}">${v ? `<img src="${esc(urlImagen(v))}" alt="">` : '<small>Sin imagen</small>'}</div>
     <div class="botones" style="padding:0"><button type="button" data-elegir-imagen="${k}">Elegir imagen</button>${v ? `<button type="button" data-quitar-imagen="${k}">Quitar</button>` : ''}</div></div>`;
-  if (tipo === 'colorop') return `<label>${etiqueta}<span style="display:flex;gap:8px;align-items:center"><input type="color" name="${k}" value="${esc(v || '#0064fc')}" ${v ? '' : 'disabled'}>
-    <label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" name="${k}_normal" ${v ? '' : 'checked'} onchange="this.form.elements['${k}'].disabled=this.checked"> Sin color</label></span></label>`;
+  if (tipo === 'colorop' || tipo === 'color') return `<div class="campo-color"><span>${etiqueta}</span>${campoColor(k, tipo === 'color' ? (v || '#3d5a80') : (v || ''), tipo === 'colorop')}</div>`;
   const opts = tipo === 'accion' ? Object.entries(E.datos.acciones) : tipo === 'grupo' ? GRUPOS : OPCIONES[tipo] ?? (REFS.includes(tipo) ? [['', '—'], ...E.datos[tipo].map(x => [x.id, x.nombre])] : null);
   if (opts) return `<label>${etiqueta}<select name="${k}">${opts.map(([val, txt]) => `<option value="${esc(val)}" ${String(val) === String(v ?? '') ? 'selected' : ''}>${esc(txt)}</option>`).join('')}</select></label>`;
-  if (tipo === 'color') return `<label>${etiqueta}<input type="color" name="${k}" value="${esc(v ?? '#3d5a80')}"></label>`;
   if (tipo === 'euros') return `<label>${etiqueta}<input name="${k}" inputmode="decimal" value="${v !== undefined ? (v / 100).toFixed(2).replace('.', ',') : ''}"></label>`;
   return `<label>${etiqueta}<input name="${k}" ${tipo === 'num' ? 'inputmode="decimal"' : ''} value="${esc(v ?? '')}"></label>`;
 }
@@ -758,7 +756,6 @@ async function pintarGestion(editar) {
     for (const [k, , tipo] of def.campos) {
       const v = form.elements[k].value;
       if (tipo === 'euros') datos[k] = Math.round(Number(v.replace(',', '.')) * 100);
-      else if (tipo === 'colorop') datos[k] = form.elements[k + '_normal'].checked ? '' : v;
       else if (['num', 'grupo', 'bool'].includes(tipo)) datos[k] = Number(String(v).replace(',', '.'));
       else if (REFS.includes(tipo)) datos[k] = v === '' ? null : Number(v);
       else datos[k] = v;
@@ -864,6 +861,157 @@ async function pintarAbiertas() {
   });
 }
 
+// ---------- Paleta de colores ----------
+// Campo de color: una muestra que abre la paleta; el valor va en un input oculto.
+function campoColor(nombre, valor, permitirVacio) {
+  return `<span class="selector-color"><input type="hidden" name="${esc(nombre)}" value="${esc(valor)}">
+    <button type="button" class="muestra-color ${valor ? '' : 'vacia'}" data-color-campo="${permitirVacio ? 'vacio' : 'lleno'}" style="--mc:${esc(valor || 'transparent')}"></button>
+    <small>${valor ? esc(valor.toUpperCase()) : 'Sin color'}</small></span>`;
+}
+function refrescarMuestra(span) {
+  const v = span.querySelector('input').value;
+  const b = span.querySelector('.muestra-color');
+  b.style.setProperty('--mc', v || 'transparent');
+  b.classList.toggle('vacia', !v);
+  span.querySelector('small').textContent = v ? v.toUpperCase() : 'Sin color';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-color-campo]');
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const span = b.closest('.selector-color');
+  const input = span.querySelector('input');
+  intentar(async () => {
+    const c = await elegirColor(input.value, b.dataset.colorCampo === 'vacio');
+    if (c === null) return;
+    input.value = c;
+    refrescarMuestra(span);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}, true);
+
+const COLORES_BASICOS = [
+  '#ff8080', '#ffff80', '#80ff80', '#00ff80', '#80ffff', '#0080ff', '#ff80c0', '#ff80ff',
+  '#ff0000', '#ffff00', '#80ff00', '#00ff40', '#00ffff', '#0080c0', '#8080c0', '#ff00ff',
+  '#804040', '#ff8040', '#00ff00', '#008080', '#004080', '#8080ff', '#800040', '#ff0080',
+  '#800000', '#ff8000', '#008000', '#008040', '#0000ff', '#0000a0', '#800080', '#8000ff',
+  '#400000', '#804000', '#004000', '#004040', '#000080', '#000040', '#400040', '#400080',
+  '#000000', '#808000', '#808040', '#808080', '#408080', '#c0c0c0', '#e6e6e6', '#ffffff',
+];
+const COLORES_MARCA = ['#0064fc', '#0b1527', '#3c3c3b', '#2e9d4f', '#c8443a', '#f59e0b', '#6f4e37', '#2a9d8f'];
+
+const hex2rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgb2hex = (r, g, b) => '#' + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('');
+function rgb2hsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+  if (max === min) return [0, 0, l * 100];
+  const d = max - min, s = l > .5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s * 100, l * 100];
+}
+function hsl2rgb(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [f(0) * 255, f(8) * 255, f(4) * 255];
+}
+function leerPersonalizados() {
+  try { const v = JSON.parse(localStorage.getItem('coloresPersonalizados') || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
+// Paleta: colores básicos, colores de la marca, colores personalizados y espectro.
+// Devuelve el color elegido (#rrggbb), '' para "sin color" o null si se cancela.
+function elegirColor(actual, permitirVacio) {
+  return new Promise(resolve => {
+    let [h, s, l] = rgb2hsl(...hex2rgb(/^#[0-9a-f]{6}$/i.test(actual) ? actual : '#0064fc'));
+    let personal = leerPersonalizados();
+    const actualHex = () => rgb2hex(...hsl2rgb(h, s, l));
+    const fila = (lista, clase = '') => lista.map(c => `<button type="button" class="${clase}" data-c="${c}" style="--mc:${c}" title="${c.toUpperCase()}"></button>`).join('');
+    abrirModal(`<h2><span>Elegir color</span><button data-cancelar="1">✕</button></h2>
+      <div class="paleta">
+        <div class="paleta-izq">
+          <h4>Colores básicos</h4><div class="muestras">${fila(COLORES_BASICOS)}</div>
+          <h4>Colores LevaDigital</h4><div class="muestras">${fila(COLORES_MARCA)}</div>
+          <h4>Colores personalizados</h4><div class="muestras" id="pal-personal"></div>
+        </div>
+        <div class="paleta-der">
+          <div class="espectro-caja"><canvas id="pal-espectro" width="256" height="200"></canvas><i id="pal-cruz"></i></div>
+          <div class="luz-caja"><canvas id="pal-luz" width="22" height="200"></canvas><i id="pal-flecha"></i></div>
+          <div class="pal-datos">
+            <div class="pal-previa" id="pal-previa"></div>
+            <label>Código <input id="pal-hex" maxlength="7" autocomplete="off"></label>
+            <label>Rojo <input id="pal-r" type="number" min="0" max="255"></label>
+            <label>Verde <input id="pal-g" type="number" min="0" max="255"></label>
+            <label>Azul <input id="pal-b" type="number" min="0" max="255"></label>
+            <button type="button" data-agregar="1">Agregar a los colores personalizados</button>
+          </div>
+        </div>
+      </div>
+      <div class="botones" style="justify-content:flex-end">
+        ${permitirVacio ? '<button type="button" data-vacio="1">Sin color</button>' : ''}
+        <button type="button" data-cancelar="1">Cancelar</button>
+        <button type="button" class="primario" data-aceptar="1">Aceptar</button>
+      </div>`);
+    const esp = $('#pal-espectro'), luz = $('#pal-luz');
+    const cx = esp.getContext('2d');
+    for (let x = 0; x < esp.width; x++) {
+      const g = cx.createLinearGradient(0, 0, 0, esp.height);
+      g.addColorStop(0, `hsl(${x / esp.width * 360},100%,50%)`);
+      g.addColorStop(1, `hsl(${x / esp.width * 360},0%,50%)`);
+      cx.fillStyle = g;
+      cx.fillRect(x, 0, 1, esp.height);
+    }
+    const pintar = (desdeCampos = false) => {
+      const lx = luz.getContext('2d');
+      const g = lx.createLinearGradient(0, 0, 0, luz.height);
+      g.addColorStop(0, '#fff'); g.addColorStop(.5, `hsl(${h},${s}%,50%)`); g.addColorStop(1, '#000');
+      lx.fillStyle = g; lx.fillRect(0, 0, luz.width, luz.height);
+      $('#pal-cruz').style.left = `${h / 360 * 100}%`;
+      $('#pal-cruz').style.top = `${100 - s}%`;
+      $('#pal-flecha').style.top = `${100 - l}%`;
+      const hex = actualHex();
+      $('#pal-previa').style.background = hex;
+      if (!desdeCampos) {
+        $('#pal-hex').value = hex.toUpperCase();
+        const [r, gg, b] = hex2rgb(hex);
+        $('#pal-r').value = r; $('#pal-g').value = gg; $('#pal-b').value = b;
+      }
+      $('#pal-personal').innerHTML = fila(personal) + '<span class="hueco"></span>'.repeat(Math.max(0, 16 - personal.length));
+      document.querySelectorAll('.paleta .muestras button').forEach(b => b.classList.toggle('elegido', b.dataset.c === hex));
+    };
+    const ponerHex = hex => { [h, s, l] = rgb2hsl(...hex2rgb(hex)); };
+    const arrastrar = (el, fn) => {
+      const mover = e => { const r = el.getBoundingClientRect(); fn(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))); pintar(); };
+      el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); mover(e); el.onpointermove = mover; });
+      el.addEventListener('pointerup', () => { el.onpointermove = null; });
+    };
+    arrastrar(esp.parentElement, (x, y) => { h = x * 360; s = (1 - y) * 100; if (l < 5 || l > 95) l = 50; });
+    arrastrar(luz.parentElement, (x, y) => { l = (1 - y) * 100; });
+    $('#pal-hex').oninput = e => { const v = e.target.value.trim(); if (/^#?[0-9a-f]{6}$/i.test(v)) { ponerHex(v.startsWith('#') ? v : '#' + v); pintar(true); } };
+    for (const id of ['#pal-r', '#pal-g', '#pal-b']) $(id).oninput = () => { ponerHex(rgb2hex(+$('#pal-r').value, +$('#pal-g').value, +$('#pal-b').value)); pintar(true); $('#pal-hex').value = actualHex().toUpperCase(); };
+    const fin = v => { cerrarModal(); resolve(v); };
+    $('#modal-caja').onclick = e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.c) { ponerHex(b.dataset.c); return pintar(); }
+      if (b.dataset.cancelar) return fin(null);
+      if (b.dataset.vacio) return fin('');
+      if (b.dataset.aceptar) return fin(actualHex());
+      if (b.dataset.agregar) {
+        personal = [actualHex(), ...personal.filter(c => c !== actualHex())].slice(0, 16);
+        try { localStorage.setItem('coloresPersonalizados', JSON.stringify(personal)); } catch {}
+        return pintar();
+      }
+    };
+    $('#modal-caja').ondblclick = e => { const b = e.target.closest('button[data-c]'); if (b) fin(b.dataset.c); };
+    const obs = new MutationObserver(() => { if ($('#modal').classList.contains('oculto')) { obs.disconnect(); resolve(null); } });
+    obs.observe($('#modal'), { attributes: true, attributeFilter: ['class'] });
+    pintar();
+  });
+}
+
 // ---------- Banco de imágenes ----------
 // Abre el selector y devuelve la ruta elegida (o null si se cancela).
 function elegirImagen(actual = '') {
@@ -942,7 +1090,7 @@ function pintarAspecto() {
   const val = { ...E.datos.aspecto };
   const grupos = [...new Set(campos.map(([, d]) => d[0]))];
   const control = ([k, [, etiqueta, tipo, min, max, , unidad]]) => tipo === 'color'
-    ? `<label class="ajuste"><span>${esc(etiqueta)}</span><input type="color" name="${k}" value="${esc(val[k])}"></label>`
+    ? `<div class="ajuste"><span>${esc(etiqueta)}</span>${campoColor(k, val[k], false)}</div>`
     : `<label class="ajuste"><span>${esc(etiqueta)}</span><output id="o-${k}">${val[k]}${unidad}</output>
         <input type="range" name="${k}" min="${min}" max="${max}" step="1" value="${val[k]}"></label>`;
   $('#vista').innerHTML = `<div class="mesas">
@@ -976,6 +1124,7 @@ function pintarAspecto() {
     if (e.target.closest('[data-volver]')) return ir('config');
     if (e.target.closest('[data-defecto]')) {
       for (const el of $('#ajustes').querySelectorAll('input')) el.value = E.datos.aspecto_campos[el.name][5];
+      $('#ajustes').querySelectorAll('.selector-color').forEach(refrescarMuestra);
       return leer();
     }
     if (e.target.closest('[data-guardar]')) {
