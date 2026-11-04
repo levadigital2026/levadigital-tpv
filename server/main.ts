@@ -14,7 +14,16 @@ mkdirSync(carpeta, { recursive: true });
 const db = openDb(join(carpeta, 'tpv.db'));
 db.exec('PRAGMA journal_mode = WAL');
 
-crearServidor(db).listen(puerto, '0.0.0.0', () => {
+const servidor = crearServidor(db);
+servidor.on('error', (e: NodeJS.ErrnoException) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\nYa hay un TPV funcionando en el puerto ${puerto}.`);
+    console.error('Cierra la otra ventana negra del TPV (o reinicia el PC) y vuelve a abrir "Iniciar TPV.bat".\n');
+    process.exit(1);
+  }
+  throw e;
+});
+servidor.listen(puerto, '0.0.0.0', () => {
   console.log(`TPV LevaDigital funcionando en el puerto ${puerto}`);
   console.log(`  En este PC:        http://localhost:${puerto}`);
   for (const lista of Object.values(networkInterfaces())) {

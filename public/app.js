@@ -58,6 +58,9 @@ const E = {
 
 async function cargarDatos() {
   E.datos = await api('GET', '/inicio');
+  if (!E.datos.botones) {
+    throw new Error('El servidor del TPV es de una versión anterior. Cierra todas las ventanas negras del TPV y vuelve a abrir "Iniciar TPV.bat".');
+  }
   $('#local').textContent = E.datos.empresa.nombre;
   const raices = familiasRaiz();
   if (!E.familia || !E.datos.familias.some(f => f.id === E.familia)) E.familia = raices[0]?.id ?? null;
