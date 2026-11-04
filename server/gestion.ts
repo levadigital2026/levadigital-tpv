@@ -1,8 +1,9 @@
 // Mantenimiento de tablas: departamentos, familias, artículos, zonas, mesas, formas de cobro y empresa.
 import { type DB, ACCIONES } from './db.ts';
 import { ErrorTPV } from './ventas.ts';
+import { rutaValida } from './imagenes.ts';
 
-type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref'; obligatorio?: boolean; valores?: string[] };
+type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref' | 'imagen' | 'color'; obligatorio?: boolean; valores?: string[] };
 
 // Campos que se pueden escribir desde la API para cada tabla.
 export const TABLAS: Record<string, Record<string, Campo>> = {
@@ -10,10 +11,12 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   familias: {
     nombre: { tipo: 'texto', obligatorio: true }, color: { tipo: 'texto' }, orden: { tipo: 'entero' },
     padre_id: { tipo: 'ref' }, departamento_id: { tipo: 'ref' },
+    imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' },
   },
   articulos: {
     nombre: { tipo: 'texto', obligatorio: true }, precio: { tipo: 'entero' }, iva: { tipo: 'decimal' },
     familia_id: { tipo: 'ref' }, grupo_cocina: { tipo: 'entero' }, orden: { tipo: 'entero' }, activo: { tipo: 'bool' },
+    imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' },
   },
   zonas: { nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['barra', 'mesas'] }, orden: { tipo: 'entero' } },
   mesas: { zona_id: { tipo: 'ref', obligatorio: true }, nombre: { tipo: 'texto', obligatorio: true }, x: { tipo: 'entero' }, y: { tipo: 'entero' } },
@@ -75,6 +78,18 @@ function limpiar(tabla: string, datos: Record<string, unknown>, nuevo: boolean) 
       case 'bool':
         out[k] = v ? 1 : 0;
         break;
+      case 'imagen': {
+        const s = String(v ?? '').trim();
+        if (s && !rutaValida(s)) throw new ErrorTPV('Imagen no válida');
+        out[k] = s;
+        break;
+      }
+      case 'color': {
+        const s = String(v ?? '').trim().toLowerCase();
+        if (s && !/^#[0-9a-f]{6}$/.test(s)) throw new ErrorTPV(`Color no válido en ${k}`);
+        out[k] = s;
+        break;
+      }
       case 'ref':
         if (v === null || v === '' || v === undefined) {
           if (c.obligatorio) throw new ErrorTPV(`Falta el campo ${k}`);

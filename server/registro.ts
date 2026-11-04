@@ -24,6 +24,7 @@ const ACCIONES: [string, RegExp, string][] = [
   ['POST', /^\/api\/caja\/cierre$/, 'Cierre de caja'],
   ['PUT', /^\/api\/empresa$/, 'Cambiar datos de empresa'],
   ['PUT', /^\/api\/aspecto$/, 'Cambiar aspecto de la pantalla'],
+  ['POST', /^\/api\/imagenes$/, 'Subir imagen'],
   ['POST', /^\/api\/gestion\/(\w+)$/, 'Configuración: crear en $1'],
   ['PUT', /^\/api\/gestion\/(\w+)\/\d+$/, 'Configuración: modificar $1'],
   ['DELETE', /^\/api\/gestion\/(\w+)\/\d+$/, 'Configuración: borrar en $1'],
@@ -40,7 +41,7 @@ export function describir(metodo: string, ruta: string) {
 const SECRETOS = new Set(['pin', 'clave', 'password', 'token']);
 function resumirDatos(datos: unknown) {
   if (!datos || typeof datos !== 'object' || !Object.keys(datos).length) return '';
-  const limpio = JSON.stringify(datos, (k, v) => (SECRETOS.has(k) ? '***' : v));
+  const limpio = JSON.stringify(datos, (k, v) => (SECRETOS.has(k) ? '***' : typeof v === 'string' && v.startsWith('data:') ? '(archivo)' : v));
   return limpio.length > 500 ? limpio.slice(0, 500) + '…' : limpio;
 }
 

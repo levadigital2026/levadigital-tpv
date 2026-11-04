@@ -243,3 +243,24 @@ test('aspecto: se guarda, se valida y vuelve en /inicio', async () => {
     assert.equal(ini.aspecto.familias_px, 300);
   } finally { await cerrar(); }
 });
+
+test('imágenes: subir, validar ruta y servir', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { usarCarpetaImagenes } = await import('../server/imagenes.ts');
+  usarCarpetaImagenes(mkdtempSync(join(tmpdir(), 'img-')));
+  const { api, cerrar } = await arrancar();
+  try {
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const r = (await api('POST', '/imagenes', { nombre: 'Café ../raro.png', datos: png })).data;
+    assert.match(r.ruta, /^Propias\/Café raro(png)?\.png$/);
+    const lista = (await api('GET', '/imagenes')).data;
+    assert.ok(lista.carpetas.some((c: any) => c.nombre === 'Propias'));
+    const art = (await api('POST', '/gestion/articulos', { nombre: 'Foto', precio: 100, imagen: r.ruta, color_fondo: '#AABBCC' })).data;
+    assert.equal(art.imagen, r.ruta);
+    assert.equal(art.color_fondo, '#aabbcc');
+    assert.equal((await api('PUT', `/gestion/articulos/${art.id}`, { imagen: '../datos/tpv.db' })).status, 400);
+    assert.equal((await api('PUT', `/gestion/articulos/${art.id}`, { color_texto: 'rojo' })).status, 400);
+  } finally { await cerrar(); }
+});

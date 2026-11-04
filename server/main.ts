@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { openDb } from './db.ts';
 import { crearServidor } from './app.ts';
 import { registrar, usarCarpetaRegistro } from './registro.ts';
+import { usarCarpetaImagenes } from './imagenes.ts';
 
 const puerto = Number(process.env.PUERTO ?? 8080);
 const carpeta = process.env.DATOS ?? join(process.cwd(), 'datos');
@@ -15,6 +16,9 @@ mkdirSync(carpeta, { recursive: true });
 const db = openDb(join(carpeta, 'tpv.db'));
 db.exec('PRAGMA journal_mode = WAL');
 usarCarpetaRegistro(join(carpeta, 'registro'));
+// Banco de imágenes: variable IMAGENES o la carpeta "imagenes" junto al programa.
+const carpetaImagenes = process.env.IMAGENES || join(process.cwd(), 'imagenes');
+usarCarpetaImagenes(carpetaImagenes);
 
 const servidor = crearServidor(db);
 servidor.on('error', (e: NodeJS.ErrnoException) => {
@@ -28,6 +32,7 @@ servidor.on('error', (e: NodeJS.ErrnoException) => {
 servidor.listen(puerto, '0.0.0.0', () => {
   registrar(db, { accion: `TPV arrancado en el puerto ${puerto}`, origen: 'servidor' });
   console.log(`TPV LevaDigital funcionando en el puerto ${puerto}`);
+  console.log(`  Imágenes:          ${carpetaImagenes}`);
   console.log(`  En este PC:        http://localhost:${puerto}`);
   for (const lista of Object.values(networkInterfaces())) {
     for (const i of lista ?? []) {

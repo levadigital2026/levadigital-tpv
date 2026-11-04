@@ -239,9 +239,19 @@ export function openDb(file: string): DB {
 const cuenta = (db: DB, tabla: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${tabla}`).get() as { n: number }).n;
 
 // Añade lo que falte en bases de datos creadas con versiones anteriores.
+function anadirColumna(db: DB, tabla: string, col: string, def: string) {
+  const cols = (db.prepare(`PRAGMA table_info(${tabla})`).all() as { name: string }[]).map(c => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${def}`);
+}
+
 function migrar(db: DB) {
-  const colsEmpresa = (db.prepare('PRAGMA table_info(empresa)').all() as { name: string }[]).map(c => c.name);
-  if (!colsEmpresa.includes('aspecto')) db.exec("ALTER TABLE empresa ADD COLUMN aspecto TEXT NOT NULL DEFAULT '{}'");
+  anadirColumna(db, 'empresa', 'aspecto', "TEXT NOT NULL DEFAULT '{}'");
+  // Imagen y colores de fondo y de letra de los botones de artículos y familias.
+  for (const t of ['articulos', 'familias']) {
+    anadirColumna(db, t, 'imagen', "TEXT NOT NULL DEFAULT ''");
+    anadirColumna(db, t, 'color_fondo', "TEXT NOT NULL DEFAULT ''");
+    anadirColumna(db, t, 'color_texto', "TEXT NOT NULL DEFAULT ''");
+  }
   tx(db, () => {
     if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'configuracion'").get()) {
       db.prepare("INSERT INTO botones (accion, texto, color, orden, visible) VALUES ('configuracion', 'Configuración', '#0b1527', 0, 1)").run();

@@ -7,6 +7,7 @@ import { type DB, ACCIONES } from './db.ts';
 import * as v from './ventas.ts';
 import * as g from './gestion.ts';
 import { registrar, describir, leerRegistro } from './registro.ts';
+import { listarImagenes, subirImagen, leerImagen } from './imagenes.ts';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TIPOS: Record<string, string> = {
@@ -65,6 +66,8 @@ ruta('POST', '/api/caja/cierre', ({ db, body }) => v.cerrarCaja(db, body));
 ruta('GET', '/api/informes/borrados', ({ db, url }) => v.informeBorrados(db, url.searchParams.get('desde'), url.searchParams.get('hasta')));
 ruta('GET', '/api/registro', ({ db, url }) => leerRegistro(db, url.searchParams.get('fecha'), url.searchParams.get('q'), url.searchParams.get('nivel')));
 
+ruta('GET', '/api/imagenes', () => listarImagenes());
+ruta('POST', '/api/imagenes', ({ body }) => subirImagen(body));
 ruta('GET', '/api/aspecto', ({ db }) => g.getAspecto(db));
 ruta('PUT', '/api/aspecto', ({ db, body }) => g.setAspecto(db, body));
 ruta('GET', '/api/empresa', ({ db }) => g.getEmpresa(db));
@@ -85,7 +88,7 @@ async function leerCuerpo(req: IncomingMessage) {
   let tam = 0;
   for await (const t of req) {
     tam += t.length;
-    if (tam > 1_000_000) throw new v.ErrorTPV('Petición demasiado grande', 413);
+    if (tam > 8_000_000) throw new v.ErrorTPV('Petición demasiado grande', 413);
     trozos.push(t);
   }
   if (!trozos.length) return {};
@@ -128,13 +131,21 @@ export function crearServidor(db: DB) {
         req.on('close', () => oyentes.delete(res));
         return;
       }
+      if (url.pathname.startsWith('/imagenes/') && req.method === 'GET') {
+        let rel = '';
+        try { rel = decodeURIComponent(url.pathname.slice('/imagenes/'.length)); } catch {}
+        const img = await leerImagen(rel);
+        if (!img) return json(res, 404, { error: 'Imagen no encontrada' });
+        res.writeHead(200, { 'content-type': img.tipo, 'cache-control': 'max-age=86400' });
+        return res.end(img.datos);
+      }
       if (url.pathname.startsWith('/api/')) {
         for (const r of rutas) {
           if (r.metodo !== req.method) continue;
           const m = r.patron.exec(url.pathname);
           if (!m) continue;
           body = r.metodo === 'GET' ? {} : await leerCuerpo(req);
-          const data = r.handler({ db, params: m.slice(1).map(decodeURIComponent), body, url });
+          const data = await r.handler({ db, params: m.slice(1).map(decodeURIComponent), body, url });
           json(res, 200, data);
           if (r.cambia) {
             registrar(db, { accion: describir(r.metodo, url.pathname), metodo: r.metodo, ruta: url.pathname, estado: 200, origen, datos: body });

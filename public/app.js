@@ -37,6 +37,7 @@ function abrirModal(html) {
 }
 function cerrarModal() {
   $('#modal').classList.add('oculto');
+  $('#modal-caja').classList.remove('ancho');
   $('#modal-caja').innerHTML = '';
 }
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') cerrarModal(); });
@@ -85,17 +86,33 @@ function aplicarAspecto(a, raiz = document.documentElement) {
 const familiasRaiz = () => E.datos.familias.filter(f => !f.padre_id);
 const hijasDe = id => E.datos.familias.filter(f => f.padre_id === id);
 
+// Imagen y colores propios de un artículo o familia.
+const urlImagen = r => '/imagenes/' + r.split('/').map(encodeURIComponent).join('/');
+function estiloBoton(x, acento) {
+  const clases = [x.color_fondo ? 'con-fondo' : '', x.color_texto ? 'con-texto' : '', x.imagen ? 'con-imagen' : ''].join(' ');
+  const estilo = `--c:${esc(acento)};${x.color_fondo ? `--bf:${esc(x.color_fondo)};` : ''}${x.color_texto ? `--bt:${esc(x.color_texto)};` : ''}`;
+  return { clases, estilo };
+}
+function botonFamilia(f, clasesExtra, contenido) {
+  const { clases, estilo } = estiloBoton(f, f.color);
+  return `<button data-familia="${f.id}" style="${estilo}" class="${clases} ${clasesExtra}">${f.imagen ? `<img class="mini" src="${esc(urlImagen(f.imagen))}" alt="" loading="lazy">` : ''}<span class="nom">${esc(f.nombre)}</span>${contenido ?? ''}</button>`;
+}
+function botonArticulo(a, acento, subtitulo, dato = `data-articulo="${a.id}"`) {
+  const { clases, estilo } = estiloBoton(a, acento);
+  return `<button ${dato} style="${estilo}" class="${clases}">${a.imagen ? `<img src="${esc(urlImagen(a.imagen))}" alt="" loading="lazy">` : ''}<em class="pie"><b>${esc(a.nombre)}</b><span>${subtitulo}</span></em></button>`;
+}
+
 // Columna de familias: las principales o, al entrar en una familia con subfamilias, sus subfamilias.
 function columnaFamilias() {
   const padre = E.datos.familias.find(f => f.id === E.nivelFam);
   const boton = f => {
     const tieneHijas = hijasDe(f.id).length > 0;
     const activa = f.id === E.familia || (!padre && antecesores(E.familia).includes(f.id));
-    return `<button data-familia="${f.id}" style="--c:${esc(f.color)}" class="${activa ? 'activa' : ''} ${tieneHijas ? 'con-sub' : ''}">${esc(f.nombre)}${tieneHijas ? '<i>›</i>' : ''}</button>`;
+    return botonFamilia(f, `${activa ? 'activa' : ''} ${tieneHijas ? 'con-sub' : ''}`, tieneHijas ? '<i>›</i>' : '');
   };
   if (!padre) return familiasRaiz().map(boton).join('');
   return `<button class="volver-fam" data-subir="1">← ${padre.padre_id ? esc(E.datos.familias.find(f => f.id === padre.padre_id)?.nombre ?? 'Familias') : 'Familias'}</button>
-    <button data-familia="${padre.id}" style="--c:${esc(padre.color)}" class="padre-fam ${padre.id === E.familia ? 'activa' : ''}">${esc(padre.nombre)}</button>
+    ${botonFamilia(padre, `padre-fam ${padre.id === E.familia ? 'activa' : ''}`)}
     ${hijasDe(padre.id).map(f => `<div class="sub-fam">${boton(f)}</div>`).join('')}`;
 }
 function antecesores(id) {
@@ -173,8 +190,8 @@ async function pintarVenta() {
       ${columnaFamilias()}
     </section>
     <section class="panel articulos">
-      ${arts.length ? '' : subfamilias.map(f => `<button data-familia="${f.id}" style="--c:${esc(f.color)}"><b>${esc(f.nombre)}</b><span>Subfamilia</span></button>`).join('')}
-      ${arts.map(a => `<button data-articulo="${a.id}" style="--c:${esc(colorDe(a.familia_id))}"><b>${esc(a.nombre)}</b><span>${euros(a.precio)}</span></button>`).join('')}
+      ${arts.length ? '' : subfamilias.map(f => botonArticulo(f, f.color, 'Subfamilia', `data-familia="${f.id}"`)).join('')}
+      ${arts.map(a => botonArticulo(a, colorDe(a.familia_id), euros(a.precio))).join('')}
       ${!arts.length && !subfamilias.length ? `<div class="vacio">${famActual ? 'Esta familia no tiene artículos' : 'No hay familias'}</div>` : ''}
     </section>
   </div>`;
@@ -638,8 +655,8 @@ async function pintarCaja() {
 
 // ---------- Gestión ----------
 const GESTION = {
-  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['grupo_cocina', 'Grupo cocina', 'grupo'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool']] },
-  familias: { titulo: 'Familias', campos: [['nombre', 'Nombre'], ['color', 'Color', 'color'], ['padre_id', 'Subfamilia de', 'familias'], ['departamento_id', 'Departamento', 'departamentos'], ['orden', 'Orden', 'num']] },
+  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['grupo_cocina', 'Grupo cocina', 'grupo'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop']] },
+  familias: { titulo: 'Familias', campos: [['nombre', 'Nombre'], ['color', 'Color', 'color'], ['padre_id', 'Subfamilia de', 'familias'], ['departamento_id', 'Departamento', 'departamentos'], ['orden', 'Orden', 'num'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop']] },
   departamentos: { titulo: 'Departamentos', campos: [['nombre', 'Nombre']] },
   zonas: { titulo: 'Zonas', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipozona'], ['orden', 'Orden', 'num']] },
   mesas: { titulo: 'Mesas', campos: [['nombre', 'Nombre'], ['zona_id', 'Zona', 'zonas'], ['x', 'Columna', 'num'], ['y', 'Fila', 'num']] },
@@ -670,12 +687,16 @@ function valorCelda(tipo, v) {
   if (tipo === 'accion') return esc(E.datos.acciones[v] ?? v);
   if (tipo === 'colorop') return v ? `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>` : 'Normal';
   if (tipo === 'color') return `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>`;
+  if (tipo === 'imagen') return v ? `<img class="mini-tabla" src="${esc(urlImagen(v))}" alt="" loading="lazy">` : '';
   return esc(v);
 }
 
 function campoForm([k, etiqueta, tipo], fila) {
   const v = fila?.[k];
   if (tipo === 'bool') return `<label><span>${etiqueta}</span><select name="${k}"><option value="1" ${v !== 0 ? 'selected' : ''}>Sí</option><option value="0" ${v === 0 ? 'selected' : ''}>No</option></select></label>`;
+  if (tipo === 'imagen') return `<div class="campo-imagen"><span>${etiqueta}</span><input type="hidden" name="${k}" value="${esc(v ?? '')}">
+    <div class="vista-imagen" data-elegir-imagen="${k}">${v ? `<img src="${esc(urlImagen(v))}" alt="">` : '<small>Sin imagen</small>'}</div>
+    <div class="botones" style="padding:0"><button type="button" data-elegir-imagen="${k}">Elegir imagen</button>${v ? `<button type="button" data-quitar-imagen="${k}">Quitar</button>` : ''}</div></div>`;
   if (tipo === 'colorop') return `<label>${etiqueta}<span style="display:flex;gap:8px;align-items:center"><input type="color" name="${k}" value="${esc(v || '#0064fc')}" ${v ? '' : 'disabled'}>
     <label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" name="${k}_normal" ${v ? '' : 'checked'} onchange="this.form.elements['${k}'].disabled=this.checked"> Sin color</label></span></label>`;
   const opts = tipo === 'accion' ? Object.entries(E.datos.acciones) : tipo === 'grupo' ? GRUPOS : OPCIONES[tipo] ?? (REFS.includes(tipo) ? [['', '—'], ...E.datos[tipo].map(x => [x.id, x.nombre])] : null);
@@ -708,9 +729,19 @@ async function pintarGestion(editar) {
     </div></div>`;
 
   $('#vista').onclick = e => intentar(async () => {
-    const b = e.target.closest('[data-volver],[data-editar],#b-borrar');
+    const b = e.target.closest('[data-volver],[data-editar],#b-borrar,[data-elegir-imagen],[data-quitar-imagen]');
     if (!b) return;
     if (b.dataset.volver) return ir('config');
+    if (b.dataset.elegirImagen || b.dataset.quitarImagen) {
+      const k = b.dataset.elegirImagen || b.dataset.quitarImagen;
+      const input = $('#f-gestion').elements[k];
+      const ruta = b.dataset.quitarImagen ? '' : await elegirImagen(input.value);
+      if (ruta === null) return;
+      input.value = ruta;
+      const vista = $(`#f-gestion .vista-imagen[data-elegir-imagen="${k}"]`);
+      vista.innerHTML = ruta ? `<img src="${esc(urlImagen(ruta))}" alt="">` : '<small>Sin imagen</small>';
+      return;
+    }
     if (b.dataset.editar) return pintarGestion(b.dataset.editar === 'nuevo' ? 'nuevo' : Number(b.dataset.editar));
     if (b.id === 'b-borrar') {
       if (!confirm('¿Borrar este registro?')) return;
@@ -830,6 +861,77 @@ async function pintarAbiertas() {
     E.cuenta = { id: Number(b.dataset.abrir) };
     E.lineaSel = null;
     return ir('venta');
+  });
+}
+
+// ---------- Banco de imágenes ----------
+// Abre el selector y devuelve la ruta elegida (o null si se cancela).
+function elegirImagen(actual = '') {
+  return new Promise(resolve => intentar(async () => {
+    E.imagenes = await api('GET', '/imagenes');
+    const { carpetas } = E.imagenes;
+    let grupo = carpetas.find(c => c.imagenes.includes(actual))?.nombre ?? carpetas[0]?.nombre ?? '';
+    let filtro = '';
+    const nombreDe = r => r.split('/').pop().replace(/\.[^.]+$/, '');
+    $('#modal-caja').classList.add('ancho');
+    abrirModal(`<h2><span>Elegir imagen</span><button data-cancelar="1">✕</button></h2>
+      <div class="banco">
+        <div class="banco-carpetas" id="banco-carpetas"></div>
+        <div class="banco-der">
+          <div class="banco-barra">
+            <input id="banco-buscar" placeholder="Buscar en todas las carpetas..." autocomplete="off">
+            <label class="boton-subir">Subir imagen<input type="file" id="banco-subir" accept="image/*" hidden></label>
+          </div>
+          <div class="banco-grid" id="banco-grid"></div>
+        </div>
+      </div>`);
+    const pintar = () => {
+      $('#banco-carpetas').innerHTML = carpetas.map(c => `<button data-grupo="${esc(c.nombre)}" class="${c.nombre === grupo && !filtro ? 'activa' : ''}">${esc(c.nombre)} <small>${c.imagenes.length}</small></button>`).join('')
+        || '<div class="vacio">No hay carpetas</div>';
+      const lista = filtro
+        ? carpetas.flatMap(c => c.imagenes).filter(r => r.toLowerCase().includes(filtro.toLowerCase())).slice(0, 300)
+        : carpetas.find(c => c.nombre === grupo)?.imagenes ?? [];
+      $('#banco-grid').innerHTML = lista.map(r => `<button data-img="${esc(r)}" class="${r === actual ? 'actual' : ''}" title="${esc(r)}"><img src="${esc(urlImagen(r))}" alt="" loading="lazy"><span>${esc(nombreDe(r))}</span></button>`).join('')
+        || `<div class="vacio">${carpetas.length ? 'No hay imágenes' : `Copia las imágenes en la carpeta<br><b>${esc(E.imagenes.carpeta)}</b><br>o súbelas con el botón "Subir imagen".`}</div>`;
+    };
+    pintar();
+    const cerrar = v => { cerrarModal(); resolve(v); };
+    $('#modal-caja').onclick = e => {
+      const b = e.target.closest('[data-grupo],[data-img],[data-cancelar]');
+      if (!b) return;
+      if (b.dataset.cancelar) return cerrar(null);
+      if (b.dataset.grupo) { grupo = b.dataset.grupo; filtro = ''; $('#banco-buscar').value = ''; return pintar(); }
+      if (b.dataset.img) return cerrar(b.dataset.img);
+    };
+    $('#banco-buscar').oninput = e => { filtro = e.target.value.trim(); pintar(); };
+    $('#banco-subir').onchange = e => intentar(async () => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = await api('POST', '/imagenes', { nombre: f.name, datos: await reducirImagen(f) });
+      aviso('Imagen subida a la carpeta Propias');
+      cerrar(r.ruta);
+    });
+    // Si se cierra tocando fuera, cuenta como cancelar.
+    const obs = new MutationObserver(() => { if ($('#modal').classList.contains('oculto')) { obs.disconnect(); resolve(null); } });
+    obs.observe($('#modal'), { attributes: true, attributeFilter: ['class'] });
+  }));
+}
+
+// Reduce la foto a un máximo de 600 px para que el TPV vaya ligero.
+function reducirImagen(archivo, max = 600) {
+  return new Promise((ok, mal) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      ok(archivo.type === 'image/png' ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => mal(new Error('No se ha podido leer la imagen'));
+    img.src = URL.createObjectURL(archivo);
   });
 }
 
