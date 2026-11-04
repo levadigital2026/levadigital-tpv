@@ -983,6 +983,7 @@ const SECCIONES_CONFIG = [
   ['Personalización', [
     ['empresa', 'Datos de empresa', 'Nombre, NIF, dirección y serie'],
     ['aspecto', 'Aspecto', 'Tamaño de zonas y botones, colores'],
+    ['escala', 'Tamaño en esta pantalla', 'Automático o fijo para este TPV'],
     ['botones', 'Botonera', 'Botones de la pantalla de venta'],
   ]],
 ];
@@ -999,6 +1000,7 @@ function pintarConfig() {
     if (!b) return;
     const k = b.dataset.ir;
     if (k === 'este_puesto') return elegirPuesto();
+    if (k === 'escala') return elegirEscala();
     if (['abiertas', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados'].includes(k)) return ir(k);
     if (k === 'informes') return ir('caja');
     E.tablaGestion = k;
@@ -1021,6 +1023,43 @@ async function pintarAbiertas() {
     E.lineaSel = null;
     return ir('venta');
   });
+}
+
+// ---------- Tamaño según la pantalla ----------
+// "auto": se diseña para 1280x800 o más; en pantallas menores (1024x768...) todo se reduce
+// en proporción. En PDA y móviles (menos de 760 px de ancho) no se toca. Cada pantalla
+// puede fijar su propio tamaño en Configuración > Tamaño en esta pantalla.
+const ESCALAS = [['auto', 'Automático'], ['0.6', '60 %'], ['0.7', '70 %'], ['0.8', '80 %'], ['0.9', '90 %'], ['1', '100 %'], ['1.1', '110 %'], ['1.25', '125 %']];
+function escalaElegida() { try { return localStorage.getItem('escala') || 'auto'; } catch { return 'auto'; } }
+function ajustarEscala() {
+  const elegida = escalaElegida();
+  let k = Number(elegida);
+  if (elegida === 'auto' || !k) {
+    const w = window.innerWidth, h = window.innerHeight;
+    k = w <= 760 ? 1 : Math.max(0.6, Math.min(1, w / 1280, h / 800));
+  }
+  document.documentElement.style.setProperty('--escala', String(Math.round(k * 100) / 100));
+}
+ajustarEscala();
+window.addEventListener('resize', ajustarEscala);
+
+function elegirEscala() {
+  const pintar = () => {
+    const actual = escalaElegida();
+    abrirModal(`<h2><span>Tamaño en esta pantalla</span><button data-m="cerrar">✕</button></h2>
+      <div class="form"><p class="nota">Pantalla de ${screen.width}×${screen.height}. "Automático" lo ajusta solo según el tamaño; si prefieres, fija uno. Se guarda solo en este dispositivo.</p>
+      <div class="po-nombres ordenes">${ESCALAS.map(([v, t]) => `<button data-escala="${v}" class="${v === actual ? 'activo' : ''}"><b>${t}</b></button>`).join('')}</div></div>`);
+    $('#modal-caja').onclick = e => {
+      const b = e.target.closest('button');
+      if (b?.dataset.m === 'cerrar') return cerrarModal();
+      if (b?.dataset.escala) {
+        try { localStorage.setItem('escala', b.dataset.escala); } catch {}
+        ajustarEscala();
+        pintar();
+      }
+    };
+  };
+  pintar();
 }
 
 // ---------- Operarios ----------

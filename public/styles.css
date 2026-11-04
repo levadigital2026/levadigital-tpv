@@ -18,6 +18,8 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--fondo); }
+/* Escala según el tamaño de la pantalla (ver ajustarEscala en app.js). */
+body { zoom: var(--escala, 1); height: calc(100vh / var(--escala, 1)); }
 body { display: flex; flex-direction: column; overflow: hidden; user-select: none; -webkit-user-select: none; }
 button { font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--borde); background: var(--panel); border-radius: var(--radio); touch-action: manipulation; }
 button:active { transform: scale(0.97); }
