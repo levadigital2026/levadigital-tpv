@@ -10,10 +10,10 @@ async function arrancar() {
   const srv = crearServidor(db);
   await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/api`;
-  const api = async (metodo: string, ruta: string, cuerpo?: unknown) => {
+  const api = async (metodo: string, ruta: string, cuerpo?: unknown, cab: Record<string, string> = {}) => {
     const r = await fetch(base + ruta, {
       method: metodo,
-      headers: cuerpo ? { 'content-type': 'application/json' } : {},
+      headers: { ...(cuerpo ? { 'content-type': 'application/json' } : {}), ...cab },
       body: cuerpo ? JSON.stringify(cuerpo) : undefined,
     });
     return { status: r.status, data: await r.json() as any };
@@ -390,4 +390,97 @@ test('operarios: clave, RFID, permisos por puesto y control de empleados', async
     assert.ok(inf.actividad.some((a: any) => a.operario === 'Ana' && a.accion === 'Cobrar cuenta'));
     assert.equal((await api('GET', '/informes/empleados', undefined, comoAna)).status, 403);
   } finally { await new Promise(r => srv.close(r)); await cerrar(); }
+});
+
+test('cierre de caja: totales por forma de pago, cuadre, cierre ciego e informe', async () => {
+  const { api, db, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const comedor = ini.zonas.find((z: any) => z.nombre === 'Comedor');
+    const mesa = ini.mesas.find((m: any) => m.zona_id === comedor.id);
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const ef = ini.formas_cobro.find((f: any) => f.tipo === 'efectivo');
+    const tj = ini.formas_cobro.find((f: any) => f.tipo === 'tarjeta');
+    const [a1, a2] = ini.articulos;
+    const vender = async (zona: any, mesaId: number | null, art: any, unidades: number, forma: any) => {
+      const c = (await api('POST', '/cuentas', { zona_id: zona.id, mesa_id: mesaId })).data;
+      await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: art.id, unidades });
+      return (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: forma.id, entregado: 100000 })).data;
+    };
+    await vender(comedor, mesa.id, a1, 3, ef);
+    await vender(barra, null, a2, 1, tj);
+    // Una cuenta borrada entera.
+    const cb = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${cb.id}/lineas`, { articulo_id: a2.id, unidades: 2 });
+    await api('DELETE', `/cuentas/${cb.id}/lineas`);
+    // Venta del año pasado (mismo día de la semana) para la comparativa.
+    const viejo = Number(db.prepare("INSERT INTO cierres (resumen) VALUES ('{}')").run().lastInsertRowid);
+    db.prepare(`INSERT INTO tickets (serie, numero, emitido_en, total, forma_cobro_id, huella_anterior, huella, cierre_id)
+                VALUES ('X', 1, datetime('now', '-364 days'), 500, ?, '', '', ?)`).run(ef.id, viejo);
+
+    const caja = (await api('GET', '/caja')).data;
+    const total = 3 * a1.precio + a2.precio;
+    assert.equal(caja.total, total);
+    assert.equal(caja.por_forma.find((f: any) => f.id === ef.id).total, 3 * a1.precio);
+    assert.equal(caja.articulos[0].unidades, 3);
+    assert.equal(caja.zonas.length, 2);
+    assert.equal(caja.mesas[0].nombre, mesa.nombre);
+    assert.equal(caja.borrados.cuentas, 1);
+    assert.equal(caja.comparativa.total_anterior, 500);
+    assert.equal(caja.formas_contar.length, 2);
+
+    // Cierre ciego en el puesto: Ana (sin permiso de cuadre) no ve importes y tiene que contar todo.
+    const puesto = ini.puestos[0];
+    await api('PUT', `/gestion/puestos/${puesto.id}`, { cierre_ciego: true, cierre_secciones: 'articulos,familias' });
+    const ana = (await api('POST', '/gestion/operarios', { nombre: 'Ana', permisos: 'cobrar,cierre_caja' })).data;
+    const encargado = ini.operarios.find((o: any) => o.nombre === 'Encargado');
+    const comoAna = { 'x-operario': String(ana.id), 'x-puesto': String(puesto.id) };
+    const comoJefe = { 'x-operario': String(encargado.id), 'x-puesto': String(puesto.id) };
+    const oculta = (await api('GET', '/caja', undefined, comoAna)).data;
+    assert.equal(oculta.oculto, true);
+    assert.equal(oculta.total, undefined);
+    assert.equal((await api('POST', '/caja/cierre', { contado: { [ef.id]: 1000 } }, comoAna)).status, 400);
+    const ci = (await api('POST', '/caja/cierre', { fondo_inicial: 5000, contado: { [ef.id]: 5000 + 3 * a1.precio - 50, [tj.id]: a2.precio } }, comoAna)).data;
+    assert.equal(ci.oculto, true);
+    assert.equal(ci.total, undefined);
+    assert.equal(ci.contado.length, 2);
+
+    // El encargado ve el cuadre: falta 0,50 en efectivo y la tarjeta cuadra.
+    const det = (await api('GET', `/informes/cierres/${ci.id}`, undefined, comoJefe)).data;
+    assert.equal(det.total, total);
+    assert.equal(det.cuadre.find((f: any) => f.id === ef.id).diferencia, -50);
+    assert.equal(det.cuadre.find((f: any) => f.id === tj.id).diferencia, 0);
+    assert.deepEqual(det.secciones, ['articulos', 'familias']);
+    assert.equal(det.operario, 'Ana');
+    const lista = (await api('GET', '/informes/cierres', undefined, comoJefe)).data;
+    assert.equal(lista[0].descuadre, -50);
+    // Tras el cierre, todo empieza de cero (también los borrados).
+    const nueva = (await api('GET', '/caja', undefined, comoJefe)).data;
+    assert.equal(nueva.total, 0);
+    assert.equal(nueva.borrados.cuentas, 0);
+  } finally { await cerrar(); }
+});
+
+test('carta de demostración: sustituye familias y artículos', async () => {
+  const { api, db, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    // Una venta anterior no impide cargar la carta; una cuenta abierta con artículos, sí.
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[0].id });
+    assert.equal((await api('POST', '/carta-demo')).status, 400);
+    await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: ini.formas_cobro[0].id, entregado: 10000 });
+    const r = (await api('POST', '/carta-demo')).data;
+    assert.deepEqual(r, { familias: 23, articulos: 140 });
+    const nuevo = (await api('GET', '/inicio')).data;
+    const cafes = nuevo.familias.find((f: any) => f.nombre === 'CAFES');
+    assert.equal(cafes.imagen, 'Carta/cafe.svg');
+    const cana = nuevo.articulos.find((a: any) => a.nombre === 'CAÑA');
+    assert.equal(cana.precio, 280);
+    assert.equal(cana.iva, 10);
+    assert.ok(cana.orden_plato_id);
+    assert.ok(nuevo.comentarios.some((x: any) => x.familia_id === cafes.id && x.texto === 'Con hielo'));
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM tickets').get() as any).n, 1);
+  } finally { await cerrar(); }
 });

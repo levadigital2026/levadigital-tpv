@@ -2,7 +2,8 @@
 // Es una carpeta del PC del TPV (por defecto ./imagenes) organizada en subcarpetas
 // (Cafés, Cervezas, Postres...). Las imágenes que se suben desde el TPV van a "Propias".
 import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, copyFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { extname, join, normalize, sep } from 'node:path';
 import { ErrorTPV } from './ventas.ts';
 
@@ -140,4 +141,26 @@ export async function leerImagen(rel: string) {
   } catch {
     return null;
   }
+}
+
+// Iconos de la carta que vienen con el programa (banco-imagenes/Carta): se copian al banco
+// de imágenes del local si faltan o han cambiado, para que la carta de demostración los tenga.
+const ICONOS_PROGRAMA = fileURLToPath(new URL('../banco-imagenes/', import.meta.url));
+export function instalarIconosCarta() {
+  let copiados = 0;
+  try {
+    for (const sub of readdirSync(ICONOS_PROGRAMA)) {
+      const origen = join(ICONOS_PROGRAMA, sub);
+      if (!statSync(origen).isDirectory()) continue;
+      mkdirSync(join(carpeta, sub), { recursive: true });
+      for (const f of readdirSync(origen)) {
+        const de = join(origen, f), a = join(carpeta, sub, f);
+        if (!existsSync(a) || statSync(a).size !== statSync(de).size) { copyFileSync(de, a); copiados++; }
+      }
+    }
+  } catch (e) {
+    console.error('No se pudieron copiar los iconos de la carta:', e);
+  }
+  if (copiados) cache = null;
+  return copiados;
 }

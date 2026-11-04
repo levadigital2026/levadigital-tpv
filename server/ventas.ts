@@ -13,7 +13,7 @@ export class ErrorTPV extends Error {
 type Row = Record<string, any>;
 
 // Operario que hace la petición en curso (lo pone el servidor antes de llamar a cada función).
-export const contexto: { operario: { id: number; nombre: string } | null } = { operario: null };
+export const contexto: { operario: { id: number; nombre: string } | null; permisos: string[]; puesto: number | null } = { operario: null, permisos: [], puesto: null };
 
 export function importeLinea(l: { unidades: number; precio: number }): number {
   return Math.round(l.unidades * l.precio);
@@ -315,28 +315,162 @@ export function listarTickets(db: DB, soloAbiertos = true) {
                      ORDER BY t.id DESC LIMIT 500`).all();
 }
 
-export function resumenCaja(db: DB) {
-  const porForma = db.prepare(`SELECT f.id, f.nombre, f.tipo, COUNT(t.id) AS tickets, COALESCE(SUM(t.total), 0) AS total
-                               FROM formas_cobro f LEFT JOIN tickets t ON t.forma_cobro_id = f.id AND t.cierre_id IS NULL
-                               GROUP BY f.id ORDER BY f.orden`).all() as Row[];
-  const porFamilia = db.prepare(`SELECT COALESCE(fa.nombre, 'Sin familia') AS nombre, SUM(tl.unidades) AS unidades, SUM(tl.importe) AS total
-                                 FROM ticket_lineas tl JOIN tickets t ON t.id = tl.ticket_id
-                                 LEFT JOIN articulos a ON a.id = tl.articulo_id LEFT JOIN familias fa ON fa.id = a.familia_id
-                                 WHERE t.cierre_id IS NULL GROUP BY fa.id ORDER BY total DESC`).all();
-  const total = porForma.reduce((s, f) => s + f.total, 0);
-  const abiertas = (db.prepare("SELECT COUNT(*) AS n FROM cuentas WHERE estado = 'abierta' AND EXISTS (SELECT 1 FROM lineas l WHERE l.cuenta_id = cuentas.id)").get() as Row).n;
-  return { total, por_forma: porForma, por_familia: porFamilia, cuentas_abiertas: abiertas };
+// ---------- Caja y cierre ----------
+// Qué se puede enseñar en el cierre (se elige en cada puesto).
+export const SECCIONES_CIERRE: Record<string, string> = {
+  borrados: 'Cuentas y líneas borradas',
+  anulaciones: 'Tickets anulados',
+  articulos: '10 artículos más vendidos',
+  familias: 'Ranking de familias',
+  comparativa: 'Comparativa con el año anterior',
+  zonas: 'Ventas por zonas',
+  mesas: 'Ventas por mesas',
+};
+
+function puestoActual(db: DB): Row | undefined {
+  return contexto.puesto ? db.prepare('SELECT * FROM puestos WHERE id = ?').get(contexto.puesto) as Row | undefined : undefined;
+}
+// Cierre ciego: en un puesto con cierre ciego solo ve los importes el operario con permiso "ver cuadre".
+export function puedeVerCuadre(db: DB) {
+  const p = puestoActual(db);
+  return !p?.cierre_ciego || contexto.permisos.includes('ver_cuadre');
 }
 
-export function cerrarCaja(db: DB, datos: { fondo_inicial?: number; efectivo_contado?: number }) {
-  return tx(db, () => {
-    const resumen = resumenCaja(db);
-    const r = db.prepare('INSERT INTO cierres (fondo_inicial, efectivo_contado, resumen) VALUES (?, ?, ?)')
-      .run(datos.fondo_inicial ?? 0, datos.efectivo_contado ?? null, JSON.stringify(resumen));
+// Informe de las ventas de un cierre (o de las ventas aún sin cerrar si cierreId es null).
+export function informeCaja(db: DB, cierreId: number | null) {
+  const enCierre = cierreId === null ? 't.cierre_id IS NULL' : 't.cierre_id = ?';
+  const a = cierreId === null ? [] : [cierreId];
+  const porForma = db.prepare(`SELECT f.id, f.nombre, f.tipo, COUNT(t.id) AS tickets, COALESCE(SUM(t.total), 0) AS total
+                               FROM formas_cobro f LEFT JOIN tickets t ON t.forma_cobro_id = f.id AND ${enCierre}
+                               GROUP BY f.id HAVING f.activa = 1 OR COUNT(t.id) > 0 ORDER BY f.orden`).all(...a) as Row[];
+  const total = porForma.reduce((s, f) => s + f.total, 0);
+  const ventas = db.prepare(`SELECT COUNT(*) AS n, MIN(datetime(emitido_en, 'localtime')) AS desde, MAX(datetime(emitido_en, 'localtime')) AS hasta
+                             FROM tickets t WHERE ${enCierre} AND anula_ticket_id IS NULL`).get(...a) as Row;
+  const anul = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total FROM tickets t WHERE ${enCierre} AND anula_ticket_id IS NOT NULL`).get(...a) as Row;
+  const familias = db.prepare(`SELECT COALESCE(fa.nombre, 'Sin familia') AS nombre, SUM(tl.unidades) AS unidades, SUM(tl.importe) AS total
+                               FROM ticket_lineas tl JOIN tickets t ON t.id = tl.ticket_id
+                               LEFT JOIN articulos ar ON ar.id = tl.articulo_id LEFT JOIN familias fa ON fa.id = ar.familia_id
+                               WHERE ${enCierre} GROUP BY fa.id HAVING SUM(tl.unidades) <> 0 ORDER BY total DESC`).all(...a);
+  const articulos = db.prepare(`SELECT tl.descripcion AS nombre, SUM(tl.unidades) AS unidades, SUM(tl.importe) AS total
+                                FROM ticket_lineas tl JOIN tickets t ON t.id = tl.ticket_id
+                                WHERE ${enCierre} GROUP BY COALESCE(tl.articulo_id, tl.descripcion) HAVING SUM(tl.unidades) > 0
+                                ORDER BY unidades DESC, total DESC LIMIT 10`).all(...a);
+  const zonas = db.prepare(`SELECT COALESCE(z.nombre, 'Sin zona') AS nombre, COUNT(DISTINCT t.cuenta_id) AS cuentas, SUM(t.total) AS total
+                            FROM tickets t LEFT JOIN cuentas c ON c.id = t.cuenta_id LEFT JOIN zonas z ON z.id = c.zona_id
+                            WHERE ${enCierre} GROUP BY z.id ORDER BY total DESC`).all(...a);
+  const mesas = db.prepare(`SELECT z.nombre AS zona, m.nombre AS nombre, COUNT(DISTINCT t.cuenta_id) AS cuentas, SUM(t.total) AS total
+                            FROM tickets t JOIN cuentas c ON c.id = t.cuenta_id JOIN mesas m ON m.id = c.mesa_id JOIN zonas z ON z.id = c.zona_id
+                            WHERE ${enCierre} GROUP BY m.id ORDER BY total DESC`).all(...a);
+  const enBorr = cierreId === null ? 'cierre_id IS NULL' : 'cierre_id = ?';
+  const borr = db.prepare(`SELECT COUNT(*) AS lineas, COALESCE(SUM(importe), 0) AS importe,
+                                  COUNT(DISTINCT CASE WHEN tipo = 'cuenta' THEN cuenta_id END) AS cuentas,
+                                  COALESCE(SUM(CASE WHEN tipo = 'cuenta' THEN importe END), 0) AS importe_cuentas
+                           FROM borrados WHERE ${enBorr}`).get(...a) as Row;
+  // Comparativa: el mismo día de la semana del año anterior (hace 52 semanas), día completo.
+  const dia = (ventas.desde as string | null)?.slice(0, 10)
+    ?? (db.prepare("SELECT date('now', 'localtime') AS d").get() as Row).d as string;
+  const antes = (db.prepare("SELECT date(?, '-364 days') AS d").get(dia) as Row).d as string;
+  const totalDia = (d: string) => db.prepare(`SELECT COUNT(CASE WHEN anula_ticket_id IS NULL THEN 1 END) AS tickets, COALESCE(SUM(total), 0) AS total
+    FROM tickets WHERE date(emitido_en, 'localtime') = ?`).get(d) as Row;
+  const anterior = totalDia(antes);
+  const abiertas = (db.prepare("SELECT COUNT(*) AS n FROM cuentas WHERE estado = 'abierta' AND EXISTS (SELECT 1 FROM lineas l WHERE l.cuenta_id = cuentas.id)").get() as Row).n;
+  return {
+    total, tickets: ventas.n, ticket_medio: ventas.n ? Math.round(total / ventas.n) : 0, desde: ventas.desde, hasta: ventas.hasta,
+    por_forma: porForma, por_familia: familias, articulos, zonas, mesas,
+    anulaciones: { tickets: anul.n, total: anul.total },
+    borrados: { lineas: borr.lineas, importe: borr.importe, cuentas: borr.cuentas, importe_cuentas: borr.importe_cuentas },
+    comparativa: { dia, anterior: antes, total_anterior: anterior.total, tickets_anterior: anterior.tickets,
+      diferencia: total - anterior.total, porcentaje: anterior.total ? Math.round((total - anterior.total) / Math.abs(anterior.total) * 1000) / 10 : null },
+    cuentas_abiertas: abiertas,
+  };
+}
+
+// Lo que ve la pantalla de Caja. En cierre ciego, sin importes para quien no puede ver el cuadre.
+export function resumenCaja(db: DB) {
+  const p = puestoActual(db);
+  const secciones = String(p?.cierre_secciones ?? Object.keys(SECCIONES_CIERRE).join(',')).split(',').filter(Boolean);
+  const formas = db.prepare("SELECT id, nombre, tipo FROM formas_cobro WHERE activa = 1 AND tipo <> 'pendiente' ORDER BY orden").all();
+  const config = { ciego: !!p?.cierre_ciego, imprimir: !!p?.imprimir_cierre, secciones, formas_contar: formas };
+  if (!puedeVerCuadre(db)) {
+    const abiertas = (db.prepare("SELECT COUNT(*) AS n FROM cuentas WHERE estado = 'abierta' AND EXISTS (SELECT 1 FROM lineas l WHERE l.cuenta_id = cuentas.id)").get() as Row).n;
+    return { ...config, oculto: true, cuentas_abiertas: abiertas };
+  }
+  return { ...config, oculto: false, ...informeCaja(db, null) };
+}
+
+// Cuadre: lo que debería haber de cada forma de pago (el efectivo con el fondo inicial) contra lo contado.
+function cuadre(porForma: Row[], fondo: number, contado: Record<string, number>) {
+  return porForma.filter(f => f.tipo !== 'pendiente').map(f => {
+    const esperado = f.total + (f.tipo === 'efectivo' ? fondo : 0);
+    const c = contado[f.id];
+    return { id: f.id, nombre: f.nombre, tipo: f.tipo, esperado, contado: c ?? null, diferencia: c === undefined ? null : c - esperado };
+  });
+}
+
+export function verCierre(db: DB, id: number) {
+  const c = db.prepare('SELECT * FROM cierres WHERE id = ?').get(id) as Row | undefined;
+  if (!c) throw new ErrorTPV('El cierre no existe', 404);
+  const resumen = JSON.parse(c.resumen);
+  const contado = JSON.parse(c.contado || '{}');
+  // Cierres antiguos: solo había efectivo contado.
+  if (!Object.keys(contado).length && c.efectivo_contado !== null) {
+    const ef = (resumen.por_forma ?? []).find((f: Row) => f.tipo === 'efectivo');
+    if (ef) contado[ef.id] = c.efectivo_contado;
+  }
+  const base = { id: c.id, cerrado_en: c.cerrado_en, operario: c.operario, ciego: !!c.ciego, fondo_inicial: c.fondo_inicial,
+    secciones: String(c.secciones || Object.keys(SECCIONES_CIERRE).join(',')).split(',').filter(Boolean) };
+  if (!puedeVerCuadre(db)) {
+    return { ...base, oculto: true, contado: cuadre(resumen.por_forma ?? [], 0, contado).map(f => ({ nombre: f.nombre, contado: f.contado })) };
+  }
+  return { ...base, oculto: false, ...resumen, cuadre: cuadre(resumen.por_forma ?? [], c.fondo_inicial, contado) };
+}
+
+export function listarCierres(db: DB) {
+  const ver = puedeVerCuadre(db);
+  return (db.prepare('SELECT * FROM cierres ORDER BY id DESC LIMIT 200').all() as Row[]).map(c => {
+    const r = JSON.parse(c.resumen);
+    let descuadre: number | null = null;
+    if (ver) {
+      const det = verCierre(db, c.id) as Row;
+      const difs = (det.cuadre as Row[]).filter(f => f.diferencia !== null);
+      descuadre = difs.length ? difs.reduce((s, f) => s + f.diferencia, 0) : null;
+    }
+    return { id: c.id, cerrado_en: c.cerrado_en, operario: c.operario, ciego: !!c.ciego,
+      total: ver ? r.total : null, tickets: ver ? r.tickets ?? null : null, descuadre };
+  });
+}
+
+export function cerrarCaja(db: DB, datos: { fondo_inicial?: number; efectivo_contado?: number; contado?: Record<string, unknown> }) {
+  const fondo = Number(datos.fondo_inicial ?? 0);
+  if (!Number.isInteger(fondo) || fondo < 0) throw new ErrorTPV('Fondo de caja no válido');
+  const contado: Record<string, number> = {};
+  for (const [k, v] of Object.entries(datos.contado ?? {})) {
+    if (v === null || v === undefined || v === '') continue;
+    const n = Number(v);
+    if (!Number.isInteger(n)) throw new ErrorTPV('Importe contado no válido');
+    contado[String(Number(k))] = n;
+  }
+  const p = puestoActual(db);
+  if (p?.cierre_ciego) {
+    const formas = db.prepare("SELECT id, nombre FROM formas_cobro WHERE activa = 1 AND tipo <> 'pendiente'").all() as Row[];
+    const falta = formas.find(f => contado[f.id] === undefined);
+    if (falta) throw new ErrorTPV(`Cierre ciego: escribe lo contado de ${falta.nombre}`);
+  }
+  const id = tx(db, () => {
+    const resumen = informeCaja(db, null);
+    const ef = resumen.por_forma.find(f => f.tipo === 'efectivo');
+    const efectivo = ef && contado[ef.id] !== undefined ? contado[ef.id] : datos.efectivo_contado ?? null;
+    const secciones = String(p?.cierre_secciones ?? Object.keys(SECCIONES_CIERRE).join(','));
+    const r = db.prepare(`INSERT INTO cierres (fondo_inicial, efectivo_contado, resumen, contado, operario_id, operario, puesto_id, ciego, secciones)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(fondo, efectivo, JSON.stringify(resumen), JSON.stringify(contado), contexto.operario?.id ?? null, contexto.operario?.nombre ?? '',
+        p?.id ?? null, p?.cierre_ciego ? 1 : 0, secciones);
     const id = Number(r.lastInsertRowid);
     db.prepare('UPDATE tickets SET cierre_id = ? WHERE cierre_id IS NULL').run(id);
+    db.prepare('UPDATE borrados SET cierre_id = ? WHERE cierre_id IS NULL').run(id);
     // Las cuentas abiertas sin líneas se descartan al cerrar.
     db.prepare("UPDATE cuentas SET estado = 'vacia' WHERE estado = 'abierta' AND NOT EXISTS (SELECT 1 FROM lineas l WHERE l.cuenta_id = cuentas.id)").run();
-    return { id, ...resumen };
+    return id;
   });
+  return { ...verCierre(db, id), imprimir: !!p?.imprimir_cierre };
 }

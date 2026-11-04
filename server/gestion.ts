@@ -1,7 +1,8 @@
 // Mantenimiento de tablas: departamentos, familias, artículos, zonas, mesas, formas de cobro y empresa.
 import { type DB, ACCIONES, PERMISOS } from './db.ts';
-import { ErrorTPV } from './ventas.ts';
-import { rutaValida, CODIGOS_ALERGENOS, buscarImagenPara, existeImagen } from './imagenes.ts';
+import { ErrorTPV, SECCIONES_CIERRE } from './ventas.ts';
+import { rutaValida, CODIGOS_ALERGENOS, buscarImagenPara, existeImagen, instalarIconosCarta } from './imagenes.ts';
+import { readFileSync } from 'node:fs';
 
 type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref' | 'imagen' | 'color' | 'alergenos' | 'lista'; obligatorio?: boolean; valores?: string[] };
 
@@ -37,6 +38,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['tpv', 'pda', 'kds'] },
     impresora_tickets_id: { tipo: 'ref' }, orden: { tipo: 'entero' },
     usar_permisos: { tipo: 'bool' }, pedir_operario: { tipo: 'bool' },
+    cierre_ciego: { tipo: 'bool' }, imprimir_cierre: { tipo: 'bool' }, cierre_secciones: { tipo: 'lista', valores: Object.keys(SECCIONES_CIERRE) },
   },
   impresoras: {
     nombre: { tipo: 'texto', obligatorio: true }, ip: { tipo: 'texto' }, puerto: { tipo: 'entero' },
@@ -298,4 +300,47 @@ export function setEmpresa(db: DB, datos: Record<string, unknown>) {
     if (k in datos) db.prepare(`UPDATE empresa SET ${k} = ? WHERE id = 1`).run(String(datos[k] ?? '').trim());
   }
   return getEmpresa(db);
+}
+
+// Carta de demostración: sustituye todas las familias y artículos por los de server/carta-demo.json.
+export function cargarCartaDemo(db: DB) {
+  const abiertas = (db.prepare("SELECT COUNT(*) AS n FROM lineas l JOIN cuentas c ON c.id = l.cuenta_id WHERE c.estado = 'abierta'").get() as { n: number }).n;
+  if (abiertas) throw new ErrorTPV('Hay cuentas abiertas con artículos: cóbralas o bórralas antes de cargar la carta');
+  const carta = JSON.parse(readFileSync(new URL('./carta-demo.json', import.meta.url), 'utf8')) as {
+    familias: { id: number; nombre: string; color: string; departamento: string; orden_plato: string; imagen: string; orden: number }[];
+    articulos: { id: number; nombre: string; precio: number; familia_id: number; imagen: string }[];
+  };
+  instalarIconosCarta();
+  db.exec('BEGIN');
+  try {
+    // Lo ya vendido no apunta a los artículos que se borran (los tickets guardan su descripción).
+    db.prepare('UPDATE lineas SET articulo_id = NULL').run();
+    db.prepare('UPDATE ticket_lineas SET articulo_id = NULL').run();
+    db.prepare('DELETE FROM comentarios WHERE familia_id IS NOT NULL OR articulo_id IS NOT NULL').run();
+    db.prepare('DELETE FROM articulos').run();
+    db.prepare('UPDATE familias SET padre_id = NULL').run();
+    db.prepare('DELETE FROM familias').run();
+    const dep = (nombre: string) => ((db.prepare('SELECT id FROM departamentos WHERE nombre = ?').get(nombre) as { id: number } | undefined)?.id
+      ?? Number(db.prepare('INSERT INTO departamentos (nombre) VALUES (?)').run(nombre).lastInsertRowid));
+    const plato = (nombre: string) => (db.prepare('SELECT id FROM ordenes_plato WHERE nombre = ?').get(nombre) as { id: number } | undefined)?.id ?? null;
+    const platoDeFamilia = new Map<number, number | null>();
+    const insF = db.prepare('INSERT INTO familias (id, nombre, color, orden, departamento_id, imagen) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const f of carta.familias) {
+      insF.run(f.id, f.nombre, f.color, f.orden, dep(f.departamento), f.imagen);
+      platoDeFamilia.set(f.id, plato(f.orden_plato));
+    }
+    const insA = db.prepare('INSERT INTO articulos (id, nombre, precio, iva, familia_id, orden, orden_plato_id, imagen) VALUES (?, ?, ?, 10, ?, ?, ?, ?)');
+    carta.articulos.forEach((a, i) => insA.run(a.id, a.nombre, a.precio, a.familia_id, i + 1, platoDeFamilia.get(a.familia_id) ?? null, a.imagen));
+    // Comentarios de ejemplo para los cafés.
+    const cafes = carta.familias.find(f => f.nombre === 'CAFES');
+    if (cafes) {
+      const c = db.prepare('INSERT INTO comentarios (texto, familia_id, orden) VALUES (?, ?, ?)');
+      ['Con hielo', 'Sin azúcar', 'Con sacarina', 'Corto de café', 'Largo de café', 'Leche fría', 'Leche sin lactosa'].forEach((t, i) => c.run(t, cafes.id, i + 1));
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return { familias: carta.familias.length, articulos: carta.articulos.length };
 }

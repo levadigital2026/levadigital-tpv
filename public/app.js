@@ -164,7 +164,7 @@ function nombreCuenta(c) {
 }
 
 // ---------- Navegación ----------
-const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados };
+const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados, cierres: pintarCierres };
 function ir(vista) {
   E.vista = vista;
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
@@ -742,36 +742,162 @@ async function pintarMesas() {
 }
 
 // ---------- Caja ----------
+const aCent = v => String(v ?? '').trim() ? Math.round(Number(String(v).replace(',', '.')) * 100) : undefined;
+const signo = c => (c > 0 ? '+' : '') + euros(c);
+const fechaLocal = s => s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)} ${s.slice(11, 16)}` : '';
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const diaLargo = d => `${DIAS[new Date(d + 'T12:00').getDay()]} ${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+
+// Bloques del informe de caja, en pantalla (tablas) o en el cierre impreso (filas de ticket).
+function bloquesCaja(r, secciones, ticket) {
+  const tabla = (titulo, cab, filas, vacio) => ticket
+    ? `<hr><div class="c"><b>${titulo}</b></div>${filas.length ? filas.map(f => `<div class="fila"><span>${f[0]}</span><span>${f.slice(1).join(' · ')}</span></div>`).join('') : `<div class="c">${vacio}</div>`}`
+    : `<h3>${titulo}</h3><table><thead><tr>${cab.map((c, i) => `<th class="${i ? 'num' : ''}">${c}</th>`).join('')}</tr></thead><tbody>
+       ${filas.map(f => `<tr>${f.map((x, i) => `<td class="${i ? 'num' : ''}">${x}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cab.length}" class="vacio">${vacio}</td></tr>`}</tbody></table>`;
+  const out = [];
+  const tiene = k => secciones.includes(k);
+  if (tiene('comparativa') && r.comparativa) {
+    const c = r.comparativa;
+    out.push(tabla('Comparativa con el año anterior', ['Día', 'Tickets', 'Ventas'], [
+      [ticket ? `Hoy ${diaLargo(c.dia).split(' ')[1]}` : `Hoy (${diaLargo(c.dia)})`, r.tickets, euros(r.total)],
+      [ticket ? `Año ant. ${diaLargo(c.anterior).split(' ')[1]}` : diaLargo(c.anterior), c.tickets_anterior, euros(c.total_anterior)],
+      ['Diferencia', ...(ticket ? [] : ['']), `${signo(c.diferencia)}${c.porcentaje !== null ? ` (${c.porcentaje > 0 ? '+' : ''}${String(c.porcentaje).replace('.', ',')} %)` : ''}`],
+    ], ''));
+  }
+  if (tiene('articulos')) out.push(tabla('10 artículos más vendidos', ['Artículo', 'Uds.', 'Importe'],
+    (r.articulos ?? []).map((x, i) => [`${i + 1}. ${esc(x.nombre)}`, uds(x.unidades), euros(x.total)]), 'Sin ventas'));
+  if (tiene('familias')) out.push(tabla('Ranking de familias', ['Familia', 'Uds.', 'Importe'],
+    (r.por_familia ?? []).map((x, i) => [`${i + 1}. ${esc(x.nombre)}`, uds(x.unidades), euros(x.total)]), 'Sin ventas'));
+  if (tiene('zonas')) out.push(tabla('Ventas por zonas', ['Zona', 'Cuentas', 'Importe'],
+    (r.zonas ?? []).map(x => [esc(x.nombre), x.cuentas, euros(x.total)]), 'Sin ventas'));
+  if (tiene('mesas')) out.push(tabla('Ventas por mesas', ['Mesa', 'Cuentas', 'Importe'],
+    (r.mesas ?? []).map(x => [`${esc(x.zona)} · ${esc(x.nombre)}`, x.cuentas, euros(x.total)]), 'Sin ventas en mesas'));
+  if (tiene('borrados') && r.borrados) out.push(tabla('Borrados', ['', 'Nº', 'Importe'], [
+    ['Cuentas borradas (borrar todo)', r.borrados.cuentas, euros(r.borrados.importe_cuentas)],
+    ['Líneas borradas (total)', r.borrados.lineas, euros(r.borrados.importe)],
+  ], ''));
+  if (tiene('anulaciones') && r.anulaciones) out.push(tabla('Tickets anulados', ['', 'Nº', 'Importe'],
+    [['Anulaciones', r.anulaciones.tickets, euros(r.anulaciones.total)]], ''));
+  return out.join('');
+}
+
+// Cierre listo para imprimir (formato ticket de 80 mm).
+function htmlCierre(c) {
+  const emp = E.datos.empresa;
+  const cab = `<div class="c"><b>${esc(emp.nombre)}</b></div>${emp.nif ? `<div class="c">NIF ${esc(emp.nif)}</div>` : ''}<hr>
+    <div class="c"><b>CIERRE DE CAJA Nº ${c.id}${c.ciego ? ' (CIEGO)' : ''}</b></div>
+    <div class="fila"><span>Fecha</span><span>${hora(c.cerrado_en)}</span></div>
+    ${c.operario ? `<div class="fila"><span>Operario</span><span>${esc(c.operario)}</span></div>` : ''}`;
+  if (c.oculto) {
+    return `<div class="ticket">${cab}<hr><div class="c"><b>CONTADO</b></div>
+      ${c.contado.map(f => `<div class="fila"><span>${esc(f.nombre)}</span><span>${f.contado === null ? '—' : euros(f.contado)}</span></div>`).join('')}
+      <hr><div class="c">El cuadre lo ve el encargado</div></div>`;
+  }
+  return `<div class="ticket">${cab}
+    ${c.desde ? `<div class="fila"><span>Primer ticket</span><span>${fechaLocal(c.desde)}</span></div><div class="fila"><span>Último ticket</span><span>${fechaLocal(c.hasta)}</span></div>` : ''}
+    <hr><div class="c"><b>VENTAS POR FORMA DE PAGO</b></div>
+    ${c.por_forma.map(f => `<div class="fila"><span>${esc(f.nombre)} (${f.tickets})</span><span>${euros(f.total)}</span></div>`).join('')}
+    <div class="fila grande"><span>TOTAL</span><span>${euros(c.total)}</span></div>
+    <div class="fila"><span>Tickets</span><span>${c.tickets}</span></div>
+    <div class="fila"><span>Ticket medio</span><span>${euros(c.ticket_medio)}</span></div>
+    <hr><div class="c"><b>CUADRE DE CAJA</b></div>
+    <div class="fila"><span>Fondo inicial</span><span>${euros(c.fondo_inicial)}</span></div>
+    ${c.cuadre.map(f => `<div class="fila"><span>${esc(f.nombre)} debería</span><span>${euros(f.esperado)}</span></div>
+      <div class="fila"><span>${esc(f.nombre)} contado</span><span>${f.contado === null ? '—' : euros(f.contado)}</span></div>
+      ${f.diferencia !== null ? `<div class="fila"><b>${f.diferencia === 0 ? 'Cuadra' : f.diferencia > 0 ? 'Sobra' : 'Falta'}</b><b>${signo(f.diferencia)}</b></div>` : ''}`).join('')}
+    ${bloquesCaja(c, c.secciones, true)}
+  </div>`;
+}
+
+function verCierreModal(c, imprimir) {
+  abrirModal(`<h2><span>Cierre de caja ${c.id}</span><button data-m="cerrar">✕</button></h2>
+    ${htmlCierre(c)}
+    <div class="botones"><button class="primario" data-m="imprimir">Imprimir</button><button data-m="cerrar">Cerrar</button></div>`);
+  $('#modal-caja').onclick = e => {
+    const b = e.target.closest('button');
+    if (b?.dataset.m === 'cerrar') cerrarModal();
+    if (b?.dataset.m === 'imprimir') window.print();
+  };
+  if (imprimir) setTimeout(() => window.print(), 300);
+}
+
 async function pintarCaja() {
   const r = await api('GET', '/caja');
-  $('#vista').innerHTML = `<div class="dos-col">
-    <section class="panel scroll">
+  const ef = id => r.por_forma?.find(f => f.id === id);
+  const izquierda = r.oculto
+    ? `<section class="panel"><h3>Cierre ciego</h3><div class="vacio" style="text-align:left;padding:12px">
+        Cuenta el dinero del cajón y mira el total del datáfono, y escribe lo que hay en cada forma de pago.<br><br>
+        El cuadre (si sobra o falta) solo lo ve el encargado.</div></section>`
+    : `<section class="panel scroll">
       <h3>Ventas desde el último cierre</h3>
       <div class="cifras">
-        <div class="cifra"><small>Total</small><b>${euros(r.total)}</b></div>
+        <div class="cifra"><small>Total · ${r.tickets} tickets</small><b>${euros(r.total)}</b></div>
+        <div class="cifra"><small>Ticket medio</small><b>${euros(r.ticket_medio)}</b></div>
         ${r.por_forma.map(f => `<div class="cifra"><small>${esc(f.nombre)} · ${f.tickets} tickets</small><b>${euros(f.total)}</b></div>`).join('')}
       </div>
-      <h3>Por familia</h3>
-      <table><thead><tr><th>Familia</th><th class="num">Unidades</th><th class="num">Importe</th></tr></thead><tbody>
-        ${r.por_familia.map(f => `<tr><td>${esc(f.nombre)}</td><td class="num">${uds(f.unidades)}</td><td class="num">${euros(f.total)}</td></tr>`).join('')}
-      </tbody></table>
-    </section>
-    <section class="panel">
-      <h3>Cierre de caja</h3>
+      <div class="bloques-caja">${bloquesCaja(r, r.secciones, false)}</div>
+    </section>`;
+  $('#vista').innerHTML = `<div class="dos-col caja">
+    ${izquierda}
+    <section class="panel scroll">
+      <h3>Cierre de caja${r.ciego ? ' ciego' : ''}</h3>
       <div class="form">
         ${r.cuentas_abiertas ? `<div class="peligro">Hay ${r.cuentas_abiertas} cuentas abiertas sin cobrar.</div>` : ''}
         <label>Fondo de caja inicial (€)<input id="fondo" inputmode="decimal" value="0"></label>
-        <label>Efectivo contado en el cajón (€)<input id="contado" inputmode="decimal" placeholder="Opcional"></label>
+        <table class="cuadre"><thead><tr><th>Forma de pago</th>${r.oculto ? '' : '<th class="num">Ventas</th><th class="num">Debería haber</th>'}<th class="num">Contado</th>${r.oculto ? '' : '<th class="num">Diferencia</th>'}</tr></thead><tbody>
+          ${r.formas_contar.map(f => `<tr data-forma="${f.id}" data-tipo="${f.tipo}"><td><b>${esc(f.nombre)}</b></td>
+            ${r.oculto ? '' : `<td class="num">${euros(ef(f.id)?.total ?? 0)}</td><td class="num" data-esperado>${euros(ef(f.id)?.total ?? 0)}</td>`}
+            <td class="num"><input data-contado="${f.id}" inputmode="decimal" placeholder="${r.ciego ? 'Obligatorio' : 'Opcional'}"></td>
+            ${r.oculto ? '' : '<td class="num" data-dif>—</td>'}</tr>`).join('')}
+        </tbody>${r.oculto ? '' : `<tfoot><tr><th>Total</th><th class="num">${euros(r.total)}</th><th></th><th></th><th></th></tr></tfoot>`}</table>
         <button class="primario" id="b-cierre" style="padding:14px">Hacer cierre de caja</button>
       </div>
     </section></div>`;
+  const recalcular = () => {
+    if (r.oculto) return;
+    const fondo = aCent($('#fondo').value) ?? 0;
+    for (const tr of document.querySelectorAll('.cuadre tbody tr')) {
+      const esperado = (ef(Number(tr.dataset.forma))?.total ?? 0) + (tr.dataset.tipo === 'efectivo' ? fondo : 0);
+      tr.querySelector('[data-esperado]').textContent = euros(esperado);
+      const c = aCent(tr.querySelector('input').value);
+      const td = tr.querySelector('[data-dif]');
+      td.textContent = c === undefined || Number.isNaN(c) ? '—' : c === esperado ? 'Cuadra' : signo(c - esperado);
+      td.className = 'num ' + (c === undefined || c === esperado ? '' : c > esperado ? 'sobra' : 'falta');
+    }
+  };
+  $('#vista').oninput = recalcular;
+  recalcular();
   $('#vista').onclick = e => intentar(async () => {
     if (e.target.id !== 'b-cierre') return;
+    const contado = {};
+    for (const i of document.querySelectorAll('[data-contado]')) {
+      const c = aCent(i.value);
+      if (c !== undefined && Number.isNaN(c)) return aviso('Importe no válido', true);
+      if (c !== undefined) contado[i.dataset.contado] = c;
+    }
     if (!confirm('¿Hacer el cierre de caja? Las ventas pasarán al histórico.')) return;
-    const aCent = v => v.trim() ? Math.round(Number(v.replace(',', '.')) * 100) : undefined;
-    const c = await api('POST', '/caja/cierre', { fondo_inicial: aCent($('#fondo').value) ?? 0, efectivo_contado: aCent($('#contado').value) });
-    aviso(`Cierre ${c.id} hecho: ${euros(c.total)}`);
-    return pintarCaja();
+    const c = await api('POST', '/caja/cierre', { fondo_inicial: aCent($('#fondo').value) ?? 0, contado });
+    aviso(`Cierre ${c.id} hecho`);
+    await pintarCaja();
+    verCierreModal(c, c.imprimir);
+  });
+}
+
+// Histórico de cierres (Configuración > Informes).
+async function pintarCierres() {
+  const lista = await api('GET', '/informes/cierres');
+  $('#vista').innerHTML = `<div class="informe scroll">
+    ${cabeceraConfig('Cierres de caja')}
+    <section class="panel"><table><thead><tr><th>Nº</th><th>Fecha</th><th>Operario</th><th class="num">Tickets</th><th class="num">Total</th><th class="num">Cuadre</th></tr></thead><tbody>
+      ${lista.map(c => `<tr class="clic" data-cierre="${c.id}"><td><b>${c.id}</b>${c.ciego ? ' <small>ciego</small>' : ''}</td><td>${hora(c.cerrado_en)}</td><td>${esc(c.operario || '—')}</td>
+        <td class="num">${c.tickets ?? '—'}</td><td class="num">${c.total === null ? '—' : euros(c.total)}</td>
+        <td class="num ${c.descuadre > 0 ? 'sobra' : c.descuadre < 0 ? 'falta' : ''}">${c.descuadre === null ? '—' : c.descuadre === 0 ? 'Cuadra' : signo(c.descuadre)}</td></tr>`).join('')
+        || '<tr><td colspan="6" class="vacio">Todavía no hay cierres</td></tr>'}
+    </tbody></table></section></div>`;
+  $('#vista').onclick = e => intentar(async () => {
+    if (e.target.closest('[data-volver]')) return ir('config');
+    const f = e.target.closest('[data-cierre]');
+    if (f) verCierreModal(await api('GET', `/informes/cierres/${f.dataset.cierre}`));
   });
 }
 
@@ -786,7 +912,7 @@ const GESTION = {
   operarios: { titulo: 'Operarios', campos: [['nombre', 'Nombre'], ['pin', 'Clave (vacía = entra sin clave)', 'clave'], ['rfid', 'Pulsera RFID', 'rfid'], ['permisos', 'Permisos', 'permisos'], ['orden', 'Orden', 'num']] },
   ordenes_plato: { titulo: 'Órdenes de plato', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
   ivas: { titulo: 'IVAs', campos: [['nombre', 'Nombre'], ['codigo', 'Código'], ['porcentaje', 'IVA %', 'num'], ['recargo', 'Recargo equivalencia %', 'num'], ['orden', 'Orden', 'num']] },
-  puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['usar_permisos', 'Activar permisos de operarios', 'bool'], ['pedir_operario', 'Pedir operario en cada operación', 'bool'], ['orden', 'Orden', 'num']] },
+  puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['usar_permisos', 'Activar permisos de operarios', 'bool'], ['pedir_operario', 'Pedir operario en cada operación', 'bool'], ['cierre_ciego', 'Cierre ciego', 'bool'], ['imprimir_cierre', 'Imprimir el cierre al terminar', 'bool'], ['cierre_secciones', 'Qué sale en el cierre de caja', 'secciones'], ['orden', 'Orden', 'num']] },
   impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   comentarios: { titulo: 'Comentarios de comanda', campos: [['texto', 'Comentario'], ['familia_id', 'Solo familia', 'familias'], ['articulo_id', 'Solo artículo', 'articulos'], ['orden', 'Orden', 'num']] },
   conceptos_pago: { titulo: 'Conceptos de pago', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
@@ -814,19 +940,22 @@ function valorCelda(tipo, v) {
   if (tipo === 'alergenos') return `<span class="alerg-tabla">${iconosAlergenos(v)}</span>`;
   if (tipo === 'clave') return v ? '••••' : 'Sin clave';
   if (tipo === 'rfid') return v ? 'Sí' : '—';
-  if (tipo === 'permisos') return String(v || '').split(',').filter(Boolean).map(p => esc(E.datos.permisos[p] ?? p)).join(', ') || 'Ninguno';
+  if (LISTAS[tipo]) return String(v || '').split(',').filter(Boolean).map(p => esc(LISTAS[tipo]()[p] ?? p)).join(', ') || 'Ninguno';
   return esc(v);
 }
+
+// Campos de selección múltiple (botones que se encienden y apagan).
+const LISTAS = { permisos: () => E.datos.permisos, secciones: () => E.datos.secciones_cierre };
 
 function campoForm([k, etiqueta, tipo], fila) {
   const v = fila?.[k];
   if (tipo === 'bool') return `<label><span>${etiqueta}</span><select name="${k}"><option value="1" ${v !== 0 ? 'selected' : ''}>Sí</option><option value="0" ${v === 0 ? 'selected' : ''}>No</option></select></label>`;
   if (tipo === 'clave') return `<label>${etiqueta}<input name="${k}" type="password" inputmode="numeric" autocomplete="new-password" value="${esc(v ?? '')}"></label>`;
   if (tipo === 'rfid') return `<label>${etiqueta}<input name="${k}" value="${esc(v ?? '')}" placeholder="Toca aquí y pasa la pulsera por el lector" autocomplete="off" onkeydown="if(event.key==='Enter')event.preventDefault()"></label>`;
-  if (tipo === 'permisos') {
+  if (LISTAS[tipo]) {
     const sel = new Set(String(v || '').split(',').filter(Boolean));
     return `<div class="campo-alergenos"><span>${etiqueta}</span><input type="hidden" name="${k}" value="${esc(v ?? '')}">
-      <div class="rejilla-permisos">${Object.entries(E.datos.permisos).map(([p, t]) => `<button type="button" data-alergeno="${p}" class="${sel.has(p) ? 'activo' : ''}">${esc(t)}</button>`).join('')}</div></div>`;
+      <div class="rejilla-permisos">${Object.entries(LISTAS[tipo]()).map(([p, t]) => `<button type="button" data-alergeno="${p}" class="${sel.has(p) ? 'activo' : ''}">${esc(t)}</button>`).join('')}</div></div>`;
   }
   if (tipo === 'alergenos') {
     const sel = new Set(String(v || '').split(',').filter(Boolean));
@@ -956,6 +1085,7 @@ function cabeceraConfig(titulo) {
 const SECCIONES_CONFIG = [
   ['Informes', [
     ['informes', 'Ventas y caja', 'Ventas por forma de cobro y por familia'],
+    ['cierres', 'Cierres de caja', 'Cierres hechos, cuadre y reimpresión'],
     ['borrados', 'Borrados', 'Líneas y cuentas borradas por operario, hora, familia y artículo'],
     ['empleados', 'Control de empleados', 'Ventas, borrados y actividad de cada operario'],
     ['registro', 'Registro de actividad', 'Todo lo que pasa en el TPV, con fecha y hora'],
@@ -966,6 +1096,7 @@ const SECCIONES_CONFIG = [
     ['departamentos', 'Departamentos', 'Agrupan familias (barra, cocina...)'],
     ['ordenes_plato', 'Órdenes de plato', 'Primeros, segundos, postres... para la comanda'],
     ['comentarios', 'Comentarios de comanda', 'Con hielo, sin azúcar... por familia o artículo'],
+    ['carta_demo', 'Cargar carta de demostración', 'Sustituye familias y artículos por la carta demo'],
   ]],
   ['Local', [
     ['zonas', 'Zonas', 'Barra, comedor, terraza...'],
@@ -1001,7 +1132,14 @@ function pintarConfig() {
     const k = b.dataset.ir;
     if (k === 'este_puesto') return elegirPuesto();
     if (k === 'escala') return elegirEscala();
-    if (['abiertas', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados'].includes(k)) return ir(k);
+    if (k === 'carta_demo') {
+      if (!confirm('Se borrarán TODAS las familias y artículos y se cargará la carta de demostración (23 familias y 140 artículos con imágenes). Los tickets ya hechos no cambian. ¿Seguir?')) return;
+      const r = await api('POST', '/carta-demo');
+      E.datos = await api('GET', '/inicio');
+      E.familia = null;
+      return aviso(`Carta cargada: ${r.familias} familias y ${r.articulos} artículos`);
+    }
+    if (['abiertas', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres'].includes(k)) return ir(k);
     if (k === 'informes') return ir('caja');
     E.tablaGestion = k;
     return ir('gestion');

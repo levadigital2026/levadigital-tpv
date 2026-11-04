@@ -1,24 +1,30 @@
 // Arranque del servidor del TPV en el PC Windows del local.
 //   node server/main.ts            -> puerto 8080, datos en ./datos/tpv.db
 //   PUERTO=9000 DATOS=C:\tpv node server/main.ts
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from './db.ts';
 import { crearServidor } from './app.ts';
 import { registrar, usarCarpetaRegistro } from './registro.ts';
-import { usarCarpetaImagenes } from './imagenes.ts';
+import { usarCarpetaImagenes, instalarIconosCarta } from './imagenes.ts';
+import { cargarCartaDemo } from './gestion.ts';
 
 const puerto = Number(process.env.PUERTO ?? 8080);
 const carpeta = process.env.DATOS ?? join(process.cwd(), 'datos');
 mkdirSync(carpeta, { recursive: true });
 
-const db = openDb(join(carpeta, 'tpv.db'));
-db.exec('PRAGMA journal_mode = WAL');
-usarCarpetaRegistro(join(carpeta, 'registro'));
 // Banco de imágenes: variable IMAGENES o la carpeta "imagenes" junto al programa.
 const carpetaImagenes = process.env.IMAGENES || join(process.cwd(), 'imagenes');
 usarCarpetaImagenes(carpetaImagenes);
+instalarIconosCarta();
+
+const nueva = !existsSync(join(carpeta, 'tpv.db'));
+const db = openDb(join(carpeta, 'tpv.db'));
+db.exec('PRAGMA journal_mode = WAL');
+usarCarpetaRegistro(join(carpeta, 'registro'));
+// Un TPV recién instalado arranca con la carta de demostración.
+if (nueva) cargarCartaDemo(db);
 
 const servidor = crearServidor(db);
 servidor.on('error', (e: NodeJS.ErrnoException) => {

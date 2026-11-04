@@ -289,6 +289,17 @@ function migrar(db: DB) {
   anadirColumna(db, 'tickets', 'operario_id', 'INTEGER');
   anadirColumna(db, 'registro', 'operario_id', 'INTEGER');
   anadirColumna(db, 'registro', 'operario', "TEXT NOT NULL DEFAULT ''");
+  // Cierre de caja: configuración por puesto (ciego, imprimir, qué secciones salen) y lo contado de cada forma de pago.
+  anadirColumna(db, 'puestos', 'cierre_ciego', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'puestos', 'imprimir_cierre', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'puestos', 'cierre_secciones', "TEXT NOT NULL DEFAULT 'borrados,anulaciones,articulos,familias,comparativa,zonas,mesas'");
+  anadirColumna(db, 'cierres', 'contado', "TEXT NOT NULL DEFAULT '{}'");
+  anadirColumna(db, 'cierres', 'operario_id', 'INTEGER');
+  anadirColumna(db, 'cierres', 'operario', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'cierres', 'puesto_id', 'INTEGER');
+  anadirColumna(db, 'cierres', 'ciego', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'cierres', 'secciones', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'borrados', 'cierre_id', 'INTEGER');
   const unaVez = (nombre: string, fn: () => void) => {
     if (db.prepare('SELECT 1 FROM migraciones WHERE nombre = ?').get(nombre)) return;
     fn();
@@ -311,6 +322,13 @@ function migrar(db: DB) {
     // Los operarios que ya existían conservan todos los permisos para que nadie se quede fuera.
     unaVez('permisos_operarios', () => {
       db.prepare('UPDATE operarios SET permisos = ?').run(Object.keys(PERMISOS).join(','));
+    });
+    // Quien ya entraba en configuración puede ver el cuadre de los cierres ciegos.
+    unaVez('permiso_ver_cuadre', () => {
+      for (const o of db.prepare('SELECT id, permisos FROM operarios').all() as { id: number; permisos: string }[]) {
+        const p = String(o.permisos).split(',').filter(Boolean);
+        if (p.includes('configuracion') && !p.includes('ver_cuadre')) db.prepare('UPDATE operarios SET permisos = ? WHERE id = ?').run([...p, 'ver_cuadre'].join(','), o.id);
+      }
     });
     // El cambio de operario se hace tocando el nombre arriba a la derecha: sin botón en la botonera.
     unaVez('quitar_boton_cambio_operario', () => {
@@ -374,6 +392,7 @@ export const PERMISOS: Record<string, string> = {
   borrar_todo: 'Borrar todo y cerrar cuentas',
   anular_ticket: 'Anular tickets',
   cierre_caja: 'Cierre de caja',
+  ver_cuadre: 'Ver el cuadre de caja (cierre ciego)',
   configuracion: 'Entrar en configuración e informes',
 };
 

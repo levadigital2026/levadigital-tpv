@@ -48,6 +48,7 @@ ruta('GET', '/api/inicio', async ({ db }) => ({
   operarios: o.operariosPublicos(db),
   puestos: g.listar(db, 'puestos'),
   permisos: PERMISOS,
+  secciones_cierre: v.SECCIONES_CIERRE,
   aspecto: g.getAspecto(db),
   aspecto_campos: g.ASPECTO,
   acciones: ACCIONES,
@@ -75,12 +76,15 @@ ruta('POST', '/api/tickets/:id/anular', ({ db, params }) => v.anularTicket(db, n
 
 ruta('GET', '/api/caja', ({ db }) => v.resumenCaja(db));
 ruta('POST', '/api/caja/cierre', ({ db, body }) => v.cerrarCaja(db, body));
+ruta('GET', '/api/informes/cierres', ({ db }) => v.listarCierres(db));
+ruta('GET', '/api/informes/cierres/:id', ({ db, params }) => v.verCierre(db, num(params[0])));
 
 ruta('GET', '/api/informes/borrados', ({ db, url }) => v.informeBorrados(db, url.searchParams.get('desde'), url.searchParams.get('hasta')));
 ruta('GET', '/api/registro', ({ db, url }) => leerRegistro(db, url.searchParams.get('fecha'), url.searchParams.get('q'), url.searchParams.get('nivel')));
 
 ruta('GET', '/api/imagenes', () => listarImagenes());
 ruta('POST', '/api/imagenes', ({ body }) => subirImagen(body));
+ruta('POST', '/api/carta-demo', ({ db }) => g.cargarCartaDemo(db));
 ruta('POST', '/api/imagenes/asignar', ({ db, body }) => g.imagenesAutomaticas(db, body));
 ruta('GET', '/api/aspecto', ({ db }) => g.getAspecto(db));
 ruta('PUT', '/api/aspecto', ({ db, body }) => g.setAspecto(db, body));
@@ -167,6 +171,8 @@ export function crearServidor(db: DB) {
           body = r.metodo === 'GET' ? {} : await leerCuerpo(req);
           o.comprobarPermiso(db, idCab('x-puesto'), operario, r.metodo, url.pathname);
           v.contexto.operario = quien;
+          v.contexto.permisos = operario?.permisos ?? [];
+          v.contexto.puesto = idCab('x-puesto');
           const data: any = await r.handler({ db, params: m.slice(1).map(decodeURIComponent), body, url });
           json(res, 200, data);
           if (r.cambia) {

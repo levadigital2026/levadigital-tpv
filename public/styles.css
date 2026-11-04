@@ -335,3 +335,15 @@ td small { color: var(--suave); }
 .cab-config { display: flex; align-items: center; gap: 14px; }
 .cab-config button { padding: 10px 14px; font-weight: 600; }
 .cab-config h2 { margin: 0; font-size: 20px; }
+
+/* Caja y cierre */
+.dos-col.caja { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.caja .cuadre { width: 100%; }
+.caja .cuadre input { width: 100%; max-width: 110px; text-align: right; padding: 8px; }
+.ticket .fila > :last-child { white-space: nowrap; }
+.caja .cuadre td, .caja .cuadre th { padding: 6px 4px; }
+.sobra { color: #1d7a3a; font-weight: 700; }
+.falta { color: #c8443a; font-weight: 700; }
+.bloques-caja { padding: 0 12px 12px; }
+.bloques-caja h3 { margin-top: 18px; }
+@media (max-width: 760px) { .dos-col.caja { grid-template-columns: 1fr; } }
