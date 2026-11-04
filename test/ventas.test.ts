@@ -216,3 +216,15 @@ test('informe de borrados y registro de actividad', async () => {
     assert.ok(!JSON.stringify((await api('GET', '/registro')).data).includes('9999'));
   } finally { await cerrar(); }
 });
+
+test('subfamilias: una familia no puede quedar dentro de sí misma', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const comida = (await api('POST', '/gestion/familias', { nombre: 'Comida' })).data;
+    const carne = (await api('POST', '/gestion/familias', { nombre: 'Carne', padre_id: comida.id })).data;
+    const filete = (await api('POST', '/gestion/familias', { nombre: 'Filetes', padre_id: carne.id })).data;
+    assert.equal(carne.padre_id, comida.id);
+    assert.equal((await api('PUT', `/gestion/familias/${comida.id}`, { padre_id: filete.id })).status, 400);
+    assert.equal((await api('PUT', `/gestion/familias/${comida.id}`, { padre_id: comida.id })).status, 400);
+  } finally { await cerrar(); }
+});

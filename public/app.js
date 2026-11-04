@@ -63,9 +63,31 @@ async function cargarDatos() {
   }
   $('#local').textContent = E.datos.empresa.nombre;
   const raices = familiasRaiz();
-  if (!E.familia || !E.datos.familias.some(f => f.id === E.familia)) E.familia = raices[0]?.id ?? null;
+  const existe = id => E.datos.familias.some(f => f.id === id);
+  if (E.nivelFam && !existe(E.nivelFam)) E.nivelFam = null;
+  if (!E.familia || !existe(E.familia)) E.familia = raices[0]?.id ?? null;
 }
 const familiasRaiz = () => E.datos.familias.filter(f => !f.padre_id);
+const hijasDe = id => E.datos.familias.filter(f => f.padre_id === id);
+
+// Columna de familias: las principales o, al entrar en una familia con subfamilias, sus subfamilias.
+function columnaFamilias() {
+  const padre = E.datos.familias.find(f => f.id === E.nivelFam);
+  const boton = f => {
+    const tieneHijas = hijasDe(f.id).length > 0;
+    const activa = f.id === E.familia || (!padre && antecesores(E.familia).includes(f.id));
+    return `<button data-familia="${f.id}" style="--c:${esc(f.color)}" class="${activa ? 'activa' : ''} ${tieneHijas ? 'con-sub' : ''}">${esc(f.nombre)}${tieneHijas ? '<i>›</i>' : ''}</button>`;
+  };
+  if (!padre) return familiasRaiz().map(boton).join('');
+  return `<button class="volver-fam" data-subir="1">← ${padre.padre_id ? esc(E.datos.familias.find(f => f.id === padre.padre_id)?.nombre ?? 'Familias') : 'Familias'}</button>
+    <button data-familia="${padre.id}" style="--c:${esc(padre.color)}" class="padre-fam ${padre.id === E.familia ? 'activa' : ''}">${esc(padre.nombre)}</button>
+    ${hijasDe(padre.id).map(f => `<div class="sub-fam">${boton(f)}</div>`).join('')}`;
+}
+function antecesores(id) {
+  const lista = [];
+  for (let f = E.datos.familias.find(x => x.id === id); f?.padre_id && lista.length < 20; f = E.datos.familias.find(x => x.id === f.padre_id)) lista.push(f.padre_id);
+  return lista;
+}
 const zonaBarra = () => E.datos.zonas.find(z => z.tipo === 'barra') ?? E.datos.zonas[0];
 
 async function cargarAbiertas() {
@@ -131,13 +153,12 @@ async function pintarVenta() {
       <div class="fila-cobrar"><button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}>Cobrar ${c?.lineas.length ? euros(c.total) : ''}</button></div>
     </section>
     <section class="panel familias">
-      ${familiasRaiz().map(f => `<button data-familia="${f.id}" style="--c:${esc(f.color)}" class="${f.id === E.familia || famActual?.padre_id === f.id ? 'activa' : ''}">${esc(f.nombre)}</button>`).join('')}
+      ${columnaFamilias()}
     </section>
     <section class="panel articulos">
-      ${famActual?.padre_id ? `<button data-familia="${famActual.padre_id}">← Volver</button>` : ''}
-      ${subfamilias.map(f => `<button data-familia="${f.id}" style="--c:${esc(f.color)}"><b>${esc(f.nombre)}</b><span>Subfamilia</span></button>`).join('')}
+      ${arts.length ? '' : subfamilias.map(f => `<button data-familia="${f.id}" style="--c:${esc(f.color)}"><b>${esc(f.nombre)}</b><span>Subfamilia</span></button>`).join('')}
       ${arts.map(a => `<button data-articulo="${a.id}" style="--c:${esc(colorDe(a.familia_id))}"><b>${esc(a.nombre)}</b><span>${euros(a.precio)}</span></button>`).join('')}
-      ${!arts.length && !subfamilias.length ? '<div class="vacio">Esta familia no tiene artículos</div>' : ''}
+      ${!arts.length && !subfamilias.length ? `<div class="vacio">${famActual ? 'Esta familia no tiene artículos' : 'No hay familias'}</div>` : ''}
     </section>
   </div>`;
 }
@@ -349,7 +370,19 @@ $('#vista').addEventListener('click', e => intentar(async () => {
   if (E.vista !== 'venta') return;
   const b = e.target.closest('[data-familia],[data-articulo],[data-cuenta],[data-tecla],[data-anular],[data-linea],[data-accion],button');
   if (!b) return;
-  if (b.dataset.familia) { E.familia = Number(b.dataset.familia); return pintarVenta(); }
+  if (b.dataset.familia) {
+    const id = Number(b.dataset.familia);
+    E.familia = id;
+    // Una familia con subfamilias abre el despliegue en la columna de familias.
+    if (hijasDe(id).length && id !== E.nivelFam) E.nivelFam = id;
+    return pintarVenta();
+  }
+  if (b.dataset.subir) {
+    const actual = E.datos.familias.find(f => f.id === E.nivelFam);
+    E.familia = actual?.id ?? E.familia;
+    E.nivelFam = actual?.padre_id ?? null;
+    return pintarVenta();
+  }
   if (b.dataset.articulo) {
     const cuenta = await asegurarCuenta();
     const n = numeroCalc();

@@ -119,10 +119,20 @@ function protegerConfiguracion(db: DB, tabla: string, id: number, v?: Record<str
   }
 }
 
+// Una familia no puede ser subfamilia de sí misma ni de una de sus subfamilias.
+function evitarCiclo(db: DB, id: number, padreId: number) {
+  const padreDe = db.prepare('SELECT padre_id FROM familias WHERE id = ?');
+  for (let p: number | null = padreId, n = 0; p != null && n < 50; n++) {
+    if (p === id) throw new ErrorTPV('Una familia no puede estar dentro de sí misma ni de sus subfamilias');
+    p = (padreDe.get(p) as { padre_id: number | null } | undefined)?.padre_id ?? null;
+  }
+}
+
 export function actualizar(db: DB, tabla: string, id: number, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, false);
   protegerConfiguracion(db, tabla, id, v);
+  if (tabla === 'familias' && v.padre_id != null) evitarCiclo(db, id, Number(v.padre_id));
   const cols = Object.keys(v);
   if (cols.length) {
     const r = db.prepare(`UPDATE ${tabla} SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE id = ?`).run(...Object.values(v), id);
