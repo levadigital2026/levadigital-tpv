@@ -298,7 +298,6 @@ async function accion(a) {
     case 'configuracion':
       if (!tienePermiso('configuracion')) return aviso('Tu operario no tiene permiso para entrar en configuración', true);
       return ir('config');
-    case 'cambio_operario': return mostrarPanelOperarios();
     case 'orden_plato': return elegirOrdenPlato();
     case 'marchar': return marcharCocina();
     case 'comanda': return verComanda();

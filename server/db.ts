@@ -312,10 +312,14 @@ function migrar(db: DB) {
     unaVez('permisos_operarios', () => {
       db.prepare('UPDATE operarios SET permisos = ?').run(Object.keys(PERMISOS).join(','));
     });
+    // El cambio de operario se hace tocando el nombre arriba a la derecha: sin botón en la botonera.
+    unaVez('quitar_boton_cambio_operario', () => {
+      db.prepare("DELETE FROM botones WHERE accion = 'cambio_operario'").run();
+    });
     unaVez('botones_comanda_operario', () => {
       const max = (db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM botones').get() as { m: number }).m;
       const b = db.prepare('INSERT INTO botones (accion, texto, color, orden, visible) VALUES (?, ?, ?, ?, 1)');
-      [['orden_plato', 'Orden de comanda', '#7c3aed'], ['marchar', 'Marchar cocina', '#e85d04'], ['comanda', 'Ver comanda', ''], ['cambio_operario', 'Cambio de operario', '#0b1527']]
+      [['orden_plato', 'Orden de comanda', '#7c3aed'], ['marchar', 'Marchar cocina', '#e85d04'], ['comanda', 'Ver comanda', '']]
         .forEach(([a, t, c], i) => { if (!db.prepare('SELECT 1 FROM botones WHERE accion = ?').get(a)) b.run(a, t, c, max + i + 1); });
     });
     if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'configuracion'").get()) {
@@ -361,7 +365,6 @@ export const ACCIONES: Record<string, string> = {
   orden_plato: 'Orden de comanda (primeros, segundos...)',
   marchar: 'Marchar cocina',
   comanda: 'Ver comanda por orden de plato',
-  cambio_operario: 'Cambio de operario',
 };
 
 // Permisos que se pueden dar a cada operario (se aplican en los puestos con permisos activados).
