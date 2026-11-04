@@ -162,6 +162,56 @@ export function borrar(db: DB, tabla: string, id: number) {
   return { borrado: true };
 }
 
+// Aspecto de la pantalla de venta: tamaños de zonas y botones, y colores.
+// [grupo, etiqueta, tipo, mínimo, máximo, por defecto, unidad]
+export const ASPECTO: Record<string, [string, string, 'num' | 'color', number, number, number | string, string]> = {
+  cuenta_pct: ['Zonas de la pantalla', 'Ancho de la cuenta y botonera', 'num', 20, 50, 30, '%'],
+  familias_px: ['Zonas de la pantalla', 'Ancho de la columna de familias', 'num', 120, 420, 230, 'px'],
+  botonera_cols: ['Botonera', 'Botones por fila', 'num', 1, 6, 3, ''],
+  botonera_alto: ['Botonera', 'Alto de los botones', 'num', 30, 100, 40, 'px'],
+  botonera_letra: ['Botonera', 'Tamaño de letra', 'num', 10, 24, 14, 'px'],
+  familias_alto: ['Familias', 'Alto de los botones', 'num', 36, 120, 60, 'px'],
+  familias_letra: ['Familias', 'Tamaño de letra', 'num', 12, 28, 17, 'px'],
+  articulos_ancho: ['Artículos', 'Ancho de los botones', 'num', 80, 280, 120, 'px'],
+  articulos_alto: ['Artículos', 'Alto de los botones', 'num', 50, 200, 86, 'px'],
+  articulos_letra: ['Artículos', 'Tamaño de letra', 'num', 12, 26, 15, 'px'],
+  color_principal: ['Colores', 'Color principal (seleccionado)', 'color', 0, 0, '#0064fc', ''],
+  color_cabecera: ['Colores', 'Color de la barra de arriba', 'color', 0, 0, '#0b1527', ''],
+  color_cobrar: ['Colores', 'Color del botón Cobrar', 'color', 0, 0, '#2e9d4f', ''],
+};
+
+export function getAspecto(db: DB) {
+  const fila = db.prepare('SELECT aspecto FROM empresa WHERE id = 1').get() as { aspecto: string } | undefined;
+  let guardado: Record<string, unknown> = {};
+  try { guardado = JSON.parse(fila?.aspecto || '{}'); } catch {}
+  const out: Record<string, number | string> = {};
+  for (const [k, [, , tipo, min, max, def]] of Object.entries(ASPECTO)) {
+    const v = guardado[k];
+    if (tipo === 'num') out[k] = typeof v === 'number' && v >= min && v <= max ? v : (def as number);
+    else out[k] = typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : (def as string);
+  }
+  return out;
+}
+
+export function setAspecto(db: DB, datos: Record<string, unknown>) {
+  const out: Record<string, number | string> = {};
+  for (const [k, v] of Object.entries(datos ?? {})) {
+    const def = ASPECTO[k];
+    if (!def) continue;
+    const [, etiqueta, tipo, min, max] = def;
+    if (tipo === 'num') {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < min || n > max) throw new ErrorTPV(`${etiqueta}: debe estar entre ${min} y ${max}`);
+      out[k] = Math.round(n);
+    } else {
+      if (typeof v !== 'string' || !/^#[0-9a-f]{6}$/i.test(v)) throw new ErrorTPV(`${etiqueta}: color no válido`);
+      out[k] = v.toLowerCase();
+    }
+  }
+  db.prepare('UPDATE empresa SET aspecto = ? WHERE id = 1').run(JSON.stringify(out));
+  return getAspecto(db);
+}
+
 export function getEmpresa(db: DB) {
   return db.prepare('SELECT * FROM empresa WHERE id = 1').get();
 }

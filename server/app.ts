@@ -40,6 +40,8 @@ ruta('GET', '/api/inicio', ({ db }) => ({
   botones: g.listar(db, 'botones'),
   impresoras: g.listar(db, 'impresoras'),
   comentarios: g.listar(db, 'comentarios'),
+  aspecto: g.getAspecto(db),
+  aspecto_campos: g.ASPECTO,
   acciones: ACCIONES,
 }));
 
@@ -63,6 +65,8 @@ ruta('POST', '/api/caja/cierre', ({ db, body }) => v.cerrarCaja(db, body));
 ruta('GET', '/api/informes/borrados', ({ db, url }) => v.informeBorrados(db, url.searchParams.get('desde'), url.searchParams.get('hasta')));
 ruta('GET', '/api/registro', ({ db, url }) => leerRegistro(db, url.searchParams.get('fecha'), url.searchParams.get('q'), url.searchParams.get('nivel')));
 
+ruta('GET', '/api/aspecto', ({ db }) => g.getAspecto(db));
+ruta('PUT', '/api/aspecto', ({ db, body }) => g.setAspecto(db, body));
 ruta('GET', '/api/empresa', ({ db }) => g.getEmpresa(db));
 ruta('PUT', '/api/empresa', ({ db, body }) => g.setEmpresa(db, body));
 ruta('GET', '/api/gestion/:tabla', ({ db, params }) => g.listar(db, params[0]));

@@ -228,3 +228,18 @@ test('subfamilias: una familia no puede quedar dentro de sí misma', async () =>
     assert.equal((await api('PUT', `/gestion/familias/${comida.id}`, { padre_id: comida.id })).status, 400);
   } finally { await cerrar(); }
 });
+
+test('aspecto: se guarda, se valida y vuelve en /inicio', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    let ini = (await api('GET', '/inicio')).data;
+    assert.equal(ini.aspecto.botonera_cols, 3);
+    const a = (await api('PUT', '/aspecto', { botonera_cols: 2, familias_px: 300, color_principal: '#FF0000' })).data;
+    assert.equal(a.botonera_cols, 2);
+    assert.equal(a.color_principal, '#ff0000');
+    assert.equal((await api('PUT', '/aspecto', { botonera_cols: 9 })).status, 400);
+    assert.equal((await api('PUT', '/aspecto', { color_cobrar: 'red' })).status, 400);
+    ini = (await api('GET', '/inicio')).data;
+    assert.equal(ini.aspecto.familias_px, 300);
+  } finally { await cerrar(); }
+});

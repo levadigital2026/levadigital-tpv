@@ -43,7 +43,7 @@ input, select { font: inherit; padding: 8px 10px; border: 1px solid var(--borde)
 main { flex: 1; min-height: 0; }
 
 /* Pantalla de venta */
-.venta { display: grid; grid-template-columns: minmax(300px, 30%) 230px 1fr; gap: 10px; padding: 10px; height: 100%; }
+.venta { display: grid; grid-template-columns: minmax(240px, var(--a-cuenta_pct, 30%)) var(--a-familias_px, 230px) 1fr; gap: 10px; padding: 10px; height: 100%; }
 .panel { background: var(--panel); border: 1px solid var(--borde); border-radius: var(--radio); display: flex; flex-direction: column; min-height: 0; }
 .cuenta-cab { padding: 10px 12px; border-bottom: 1px solid var(--borde); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .cuenta-cab b { font-size: 17px; }
@@ -68,24 +68,23 @@ main { flex: 1; min-height: 0; }
 .teclado { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px; border-top: 1px solid var(--borde); }
 .teclado button { padding: 12px 0; font-size: 18px; font-weight: 600; }
 .teclado .pantalla { grid-column: 1 / 5; text-align: right; font-size: 20px; padding: 6px 10px; background: #f1f4f7; border-radius: 8px; min-height: 38px; font-variant-numeric: tabular-nums; }
-.acciones { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 8px 8px; }
-.acciones button { padding: 10px 4px; font-weight: 600; font-size: 14px; }
+.acciones { display: grid; grid-template-columns: repeat(var(--a-botonera_cols, 3), minmax(0, 1fr)); gap: 6px; padding: 0 8px 8px; }
+.acciones button { padding: 4px; min-height: var(--a-botonera_alto, 40px); font-weight: 600; font-size: var(--a-botonera_letra, 14px); overflow: hidden; }
 .acciones button.color { background: var(--bc); border-color: var(--bc); color: #fff; }
 .fila-cobrar { padding: 0 8px 8px; }
 .cobrar { width: 100%; background: var(--cobrar); color: #fff; border-color: var(--cobrar); font-size: 20px; font-weight: 600; padding: 14px; }
 .peligro { color: var(--peligro); }
 
 .familias { overflow-y: auto; padding: 8px; gap: 6px; display: flex; flex-direction: column; }
-.familias button { padding: 18px 12px; font-size: 17px; font-weight: 600; text-align: left; border-left: 6px solid var(--c, var(--azul)); }
+.familias button { padding: 8px 12px; min-height: var(--a-familias_alto, 60px); font-size: var(--a-familias_letra, 17px); font-weight: 600; text-align: left; border-left: 6px solid var(--c, var(--azul)); }
 .familias button.activa { background: var(--marca); color: #fff; border-color: var(--marca); }
 .familias button { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: none; }
 .familias button i { font-style: normal; font-size: 22px; line-height: 1; opacity: .7; }
-.familias .volver-fam { background: var(--azul); color: #fff; border-color: var(--azul); border-left-color: var(--azul); font-size: 16px; padding: 14px 12px; }
-.familias .padre-fam { font-size: 18px; }
+.familias .volver-fam { background: var(--azul); color: #fff; border-color: var(--azul); border-left-color: var(--azul); }
 .familias .sub-fam { padding-left: 14px; display: flex; flex-direction: column; flex: none; }
-.articulos { overflow-y: auto; padding: 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; align-content: start; }
-.articulos button { min-height: 86px; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; text-align: left; border-top: 5px solid var(--c, var(--azul)); }
-.articulos button b { font-size: 15px; }
+.articulos { overflow-y: auto; padding: 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--a-articulos_ancho, 120px), 1fr)); gap: 8px; align-content: start; }
+.articulos button { min-height: var(--a-articulos_alto, 86px); padding: 8px; display: flex; flex-direction: column; justify-content: space-between; text-align: left; border-top: 5px solid var(--c, var(--azul)); }
+.articulos button b { font-size: var(--a-articulos_letra, 15px); }
 .articulos button span { color: var(--suave); font-size: 14px; }
 .abiertas { overflow-y: auto; }
 .abiertas h3, .panel h3 { margin: 0; padding: 10px 12px; font-size: 15px; border-bottom: 1px solid var(--borde); }
@@ -172,9 +171,23 @@ tr.nivel-error td { background: #fdecea; }
 td.datos { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--suave); word-break: break-all; max-width: 420px; }
 td small { color: var(--suave); }
 
+.aspecto { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 12px; padding: 10px; height: 100%; min-height: 0; }
+.aspecto .ajustes { overflow-y: auto; padding: 4px 12px 12px; }
+.aspecto .ajustes h3 { padding: 12px 0 6px; border: 0; font-size: 13px; color: var(--suave); text-transform: uppercase; letter-spacing: .5px; }
+.ajuste { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 6px 0; }
+.ajuste span { font-size: 14px; }
+.ajuste output { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ajuste input[type=range] { grid-column: 1 / 3; width: 100%; padding: 0; accent-color: var(--marca); }
+.ajuste input[type=color] { width: 56px; height: 36px; padding: 2px; }
+.aspecto .acciones-aspecto { display: flex; gap: 8px; padding: 12px 0; position: sticky; bottom: 0; background: var(--panel); flex-wrap: wrap; }
+.aspecto .acciones-aspecto button { padding: 12px 16px; font-weight: 600; }
+.previa { position: relative; overflow: hidden; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--fondo); }
+.previa iframe { position: absolute; top: 0; left: 0; width: 1280px; height: 800px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.previa small { position: absolute; right: 10px; bottom: 8px; background: var(--azul); color: #fff; padding: 4px 8px; border-radius: 6px; }
+
 /* Pantallas estrechas: PDA y móviles */
 @media (max-width: 1100px) {
-  .venta { grid-template-columns: minmax(280px, 38%) 170px 1fr; }
+  .venta { grid-template-columns: minmax(240px, max(var(--a-cuenta_pct, 30%), 34%)) min(var(--a-familias_px, 230px), 180px) 1fr; }
 }
 @media (max-width: 760px) {
   .barra-sup { flex-wrap: wrap; gap: 6px; padding: 6px 10px; }

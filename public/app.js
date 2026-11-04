@@ -62,11 +62,26 @@ async function cargarDatos() {
     throw new Error('El servidor del TPV es de una versión anterior. Cierra todas las ventanas negras del TPV y vuelve a abrir "Iniciar TPV.bat".');
   }
   $('#local').textContent = E.datos.empresa.nombre;
+  aplicarAspecto(E.datos.aspecto);
   const raices = familiasRaiz();
   const existe = id => E.datos.familias.some(f => f.id === id);
   if (E.nivelFam && !existe(E.nivelFam)) E.nivelFam = null;
-  if (!E.familia || !existe(E.familia)) E.familia = raices[0]?.id ?? null;
+  if (!E.familia || !existe(E.familia)) {
+    E.familia = raices[0]?.id ?? null;
+    E.nivelFam = E.datos.familias.some(f => f.padre_id === E.familia) ? E.familia : null;
+  }
 }
+// Pone los tamaños y colores elegidos en Configuración > Aspecto como variables CSS.
+const COLORES_ASPECTO = { color_principal: '--marca', color_cabecera: '--azul', color_cobrar: '--cobrar' };
+function aplicarAspecto(a, raiz = document.documentElement) {
+  if (!a || !E.datos?.aspecto_campos) return;
+  for (const [k, def] of Object.entries(E.datos.aspecto_campos)) {
+    if (a[k] === undefined) continue;
+    if (COLORES_ASPECTO[k]) raiz.style.setProperty(COLORES_ASPECTO[k], a[k]);
+    else raiz.style.setProperty(`--a-${k}`, a[k] + def[6]);
+  }
+}
+
 const familiasRaiz = () => E.datos.familias.filter(f => !f.padre_id);
 const hijasDe = id => E.datos.familias.filter(f => f.padre_id === id);
 
@@ -103,7 +118,7 @@ function nombreCuenta(c) {
 }
 
 // ---------- Navegación ----------
-const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro };
+const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto };
 function ir(vista) {
   E.vista = vista;
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
@@ -778,6 +793,7 @@ const SECCIONES_CONFIG = [
   ]],
   ['Personalización', [
     ['empresa', 'Datos de empresa', 'Nombre, NIF, dirección y serie'],
+    ['aspecto', 'Aspecto', 'Tamaño de zonas y botones, colores'],
     ['botones', 'Botonera', 'Botones de la pantalla de venta'],
   ]],
 ];
@@ -793,7 +809,7 @@ function pintarConfig() {
     const b = e.target.closest('[data-ir]');
     if (!b) return;
     const k = b.dataset.ir;
-    if (['abiertas', 'empresa', 'borrados', 'registro'].includes(k)) return ir(k);
+    if (['abiertas', 'empresa', 'borrados', 'registro', 'aspecto'].includes(k)) return ir(k);
     if (k === 'informes') return ir('caja');
     E.tablaGestion = k;
     return ir('gestion');
@@ -814,6 +830,57 @@ async function pintarAbiertas() {
     E.cuenta = { id: Number(b.dataset.abrir) };
     E.lineaSel = null;
     return ir('venta');
+  });
+}
+
+// ---------- Aspecto ----------
+// Ajustes a la izquierda y, a la derecha, la pantalla de venta real en pequeño, que cambia al mover cada ajuste.
+function pintarAspecto() {
+  const campos = Object.entries(E.datos.aspecto_campos);
+  const val = { ...E.datos.aspecto };
+  const grupos = [...new Set(campos.map(([, d]) => d[0]))];
+  const control = ([k, [, etiqueta, tipo, min, max, , unidad]]) => tipo === 'color'
+    ? `<label class="ajuste"><span>${esc(etiqueta)}</span><input type="color" name="${k}" value="${esc(val[k])}"></label>`
+    : `<label class="ajuste"><span>${esc(etiqueta)}</span><output id="o-${k}">${val[k]}${unidad}</output>
+        <input type="range" name="${k}" min="${min}" max="${max}" step="1" value="${val[k]}"></label>`;
+  $('#vista').innerHTML = `<div class="mesas">
+    ${cabeceraConfig('Aspecto de la pantalla de venta')}
+    <div class="aspecto">
+      <section class="panel ajustes" id="ajustes">
+        ${grupos.map(g => `<h3>${esc(g)}</h3>${campos.filter(([, d]) => d[0] === g).map(control).join('')}`).join('')}
+        <div class="acciones-aspecto">
+          <button class="primario" data-guardar="1">Guardar</button>
+          <button data-defecto="1">Valores de fábrica</button>
+        </div>
+      </section>
+      <div class="previa" id="previa"><iframe src="/" title="Vista previa" tabindex="-1"></iframe><small>Vista previa</small></div>
+    </div></div>`;
+  const marco = $('#previa iframe');
+  const escalar = () => { const p = $('#previa'); if (p) marco.style.transform = `scale(${Math.min(p.clientWidth / 1280, p.clientHeight / 800)})`; };
+  escalar();
+  new ResizeObserver(escalar).observe($('#previa'));
+  const aPrevia = () => { try { aplicarAspecto(val, marco.contentDocument.documentElement); } catch {} };
+  marco.addEventListener('load', () => setTimeout(aPrevia, 300));
+  const leer = () => {
+    for (const el of $('#ajustes').querySelectorAll('input')) {
+      val[el.name] = el.type === 'range' ? Number(el.value) : el.value;
+      const o = $(`#o-${el.name}`);
+      if (o) o.textContent = el.value + E.datos.aspecto_campos[el.name][6];
+    }
+    aPrevia();
+  };
+  $('#ajustes').oninput = leer;
+  $('#vista').onclick = e => intentar(async () => {
+    if (e.target.closest('[data-volver]')) return ir('config');
+    if (e.target.closest('[data-defecto]')) {
+      for (const el of $('#ajustes').querySelectorAll('input')) el.value = E.datos.aspecto_campos[el.name][5];
+      return leer();
+    }
+    if (e.target.closest('[data-guardar]')) {
+      E.datos.aspecto = await api('PUT', '/aspecto', val);
+      aplicarAspecto(E.datos.aspecto);
+      aviso('Aspecto guardado. Se aplica en todos los puestos.');
+    }
   });
 }
 
@@ -904,7 +971,7 @@ function conectarEventos() {
     const { tipo } = JSON.parse(ev.data);
     clearTimeout(t);
     t = setTimeout(() => intentar(async () => {
-      if (tipo === 'gestion' || tipo === 'empresa') await cargarDatos();
+      if (tipo === 'gestion' || tipo === 'empresa' || tipo === 'aspecto') await cargarDatos();
       if (!['venta', 'mesas', 'abiertas'].includes(E.vista)) await cargarAbiertas();
       if (!$('#modal').classList.contains('oculto')) return;
       if (['venta', 'mesas', 'abiertas'].includes(E.vista)) await VISTAS[E.vista]();

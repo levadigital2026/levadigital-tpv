@@ -220,7 +220,8 @@ CREATE TABLE IF NOT EXISTS empresa (
   nombre TEXT NOT NULL DEFAULT 'Mi local',
   nif TEXT NOT NULL DEFAULT '',
   direccion TEXT NOT NULL DEFAULT '',
-  serie_tickets TEXT NOT NULL DEFAULT 'T'
+  serie_tickets TEXT NOT NULL DEFAULT 'T',
+  aspecto TEXT NOT NULL DEFAULT '{}'
 );
 `;
 
@@ -239,6 +240,8 @@ const cuenta = (db: DB, tabla: string) => (db.prepare(`SELECT COUNT(*) AS n FROM
 
 // Añade lo que falte en bases de datos creadas con versiones anteriores.
 function migrar(db: DB) {
+  const colsEmpresa = (db.prepare('PRAGMA table_info(empresa)').all() as { name: string }[]).map(c => c.name);
+  if (!colsEmpresa.includes('aspecto')) db.exec("ALTER TABLE empresa ADD COLUMN aspecto TEXT NOT NULL DEFAULT '{}'");
   tx(db, () => {
     if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'configuracion'").get()) {
       db.prepare("INSERT INTO botones (accion, texto, color, orden, visible) VALUES ('configuracion', 'Configuración', '#0b1527', 0, 1)").run();
