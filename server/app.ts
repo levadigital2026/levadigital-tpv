@@ -97,7 +97,8 @@ async function estatico(res: ServerResponse, pathname: string) {
   if (!ruta.startsWith(PUBLIC)) return json(res, 403, { error: 'Prohibido' });
   try {
     const datos = await readFile(ruta);
-    res.writeHead(200, { 'content-type': TIPOS[extname(ruta)] ?? 'application/octet-stream' });
+    // no-cache: el navegador comprueba siempre si hay una versión nueva tras actualizar el TPV.
+    res.writeHead(200, { 'content-type': TIPOS[extname(ruta)] ?? 'application/octet-stream', 'cache-control': 'no-cache' });
     res.end(datos);
   } catch {
     json(res, 404, { error: 'No encontrado' });
