@@ -36,6 +36,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
   },
   conceptos_pago: { nombre: { tipo: 'texto', obligatorio: true }, orden: { tipo: 'entero' } },
+  comentarios: { texto: { tipo: 'texto', obligatorio: true }, familia_id: { tipo: 'ref' }, articulo_id: { tipo: 'ref' }, orden: { tipo: 'entero' } },
   botones: {
     accion: { tipo: 'texto', obligatorio: true, valores: Object.keys(ACCIONES) }, texto: { tipo: 'texto', obligatorio: true },
     color: { tipo: 'texto' }, orden: { tipo: 'entero' }, visible: { tipo: 'bool' },

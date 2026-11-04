@@ -155,3 +155,28 @@ test('configuración: el botón de herramientas no se puede quitar y existen las
     assert.equal(imp.puerto, 9100);
   } finally { await cerrar(); }
 });
+
+test('texto de comanda: se cambia para cocina pero el ticket lleva la descripción original', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const cafe = ini.articulos.find((a: any) => a.nombre === 'Café solo');
+    const delCafe = ini.comentarios.filter((c: any) => c.familia_id === cafe.familia_id).map((c: any) => c.texto);
+    assert.ok(delCafe.includes('Con hielo'));
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const tarjeta = ini.formas_cobro.find((f: any) => f.tipo === 'tarjeta');
+
+    let c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    c = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: cafe.id })).data;
+    const id = c.lineas[0].id;
+    c = (await api('PATCH', `/lineas/${id}`, { detalle: '  Café solo   con hielo ' })).data;
+    assert.equal(c.lineas[0].detalle, 'Café solo con hielo');
+    // Volver a la descripción original deja el texto de comanda vacío.
+    c = (await api('PATCH', `/lineas/${id}`, { detalle: 'Café solo' })).data;
+    assert.equal(c.lineas[0].detalle, '');
+    await api('PATCH', `/lineas/${id}`, { detalle: 'Café solo con hielo' });
+
+    const t = (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: tarjeta.id })).data;
+    assert.equal(t.lineas[0].descripcion, 'Café solo');
+  } finally { await cerrar(); }
+});

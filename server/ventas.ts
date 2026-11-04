@@ -90,7 +90,13 @@ export function modificarLinea(db: DB, lineaId: number, datos: { unidades?: numb
     if (!Number.isInteger(datos.precio) || datos.precio < 0) throw new ErrorTPV('Precio no válido');
     db.prepare('UPDATE lineas SET precio = ? WHERE id = ?').run(datos.precio, lineaId);
   }
-  if (datos.detalle !== undefined) db.prepare('UPDATE lineas SET detalle = ? WHERE id = ?').run(String(datos.detalle), lineaId);
+  if (datos.detalle !== undefined) {
+    // Texto que sale en la comanda de cocina o barra. El ticket siempre lleva la descripción original.
+    let t = String(datos.detalle ?? '').replace(/\s+/g, ' ').trim();
+    if (t.length > 200) throw new ErrorTPV('El texto de la comanda es demasiado largo');
+    if (t === l.descripcion) t = '';
+    db.prepare('UPDATE lineas SET detalle = ? WHERE id = ?').run(t, lineaId);
+  }
   return getCuenta(db, l.cuenta_id);
 }
 

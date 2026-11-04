@@ -114,7 +114,7 @@ async function pintarVenta() {
             <button class="linea-anular" data-anular="${l.id}">Anular</button>
             <div class="linea ${l.id === E.lineaSel ? 'sel' : ''}" data-linea="${l.id}">
               <span class="uds">${uds(l.unidades)}</span><span>${esc(l.descripcion)}</span><span>${euros(Math.round(l.unidades * l.precio))}</span>
-              ${l.detalle ? `<span class="det">${esc(l.detalle)}</span>` : ''}
+              ${l.detalle ? `<span class="det" title="Texto de la comanda">✎ ${esc(l.detalle)}</span>` : ''}
             </div>
           </div>`).join('') : '<div class="vacio">Sin artículos</div>'}
       </div>
@@ -214,13 +214,7 @@ async function accion(a) {
       E.cuenta = await api('DELETE', `/cuentas/${c.id}/lineas`);
       E.lineaSel = null;
       return pintarVenta();
-    case 'detalle': {
-      const l = c.lineas.find(x => x.id === E.lineaSel);
-      const texto = prompt('Detalle para cocina (ej.: sin sal, poco hecho)', l?.detalle ?? '');
-      if (texto === null) return;
-      E.cuenta = await api('PATCH', `/lineas/${E.lineaSel}`, { detalle: texto });
-      return pintarVenta();
-    }
+    case 'detalle': return editarComanda(E.lineaSel);
     case 'comensales': {
       const r = prompt('Número de comensales', String(c.comensales || ''));
       if (r === null) return;
@@ -243,17 +237,75 @@ async function accion(a) {
   }
 }
 
-// Deslizar una línea hacia la izquierda muestra el botón Anular.
+// Comentarios que se ofrecen para una línea: los del artículo, los de su familia y los generales.
+function comentariosDe(l) {
+  const art = E.datos.articulos.find(a => a.id === l.articulo_id);
+  const lista = E.datos.comentarios ?? [];
+  const peso = c => c.articulo_id ? (c.articulo_id === l.articulo_id ? 0 : -1)
+    : c.familia_id ? (art && c.familia_id === art.familia_id ? 1 : -1) : 2;
+  return lista.map(c => [peso(c), c]).filter(([p]) => p >= 0).sort((a, b) => a[0] - b[0] || a[1].orden - b[1].orden).map(([, c]) => c);
+}
+
+// Texto de la comanda: lo que sale en la impresora de cocina o barra. El ticket lleva siempre la descripción original.
+function editarComanda(id) {
+  const l = E.cuenta?.lineas?.find(x => x.id === id);
+  if (!l) return;
+  E.lineaSel = id;
+  const coms = comentariosDe(l);
+  abrirModal(`<h2><span>Comanda: ${esc(l.descripcion)}</span><button data-cerrar="1">✕</button></h2>
+    <div class="comanda">
+      <label>Texto para cocina / barra</label>
+      <textarea id="txt-comanda" rows="2" maxlength="200">${esc(l.detalle || l.descripcion)}</textarea>
+      <small>En el ticket del cliente saldrá: <b>${esc(l.descripcion)}</b></small>
+      ${coms.length ? `<div class="chips">${coms.map(c => `<button data-com="${esc(c.texto)}">${esc(c.texto)}</button>`).join('')}</div>` : ''}
+      <div class="botones-modal">
+        <button data-original="1">Restaurar original</button>
+        <button data-cerrar="1">Cancelar</button>
+        <button class="primario" data-guardar="1">Guardar</button>
+      </div>
+    </div>`);
+  const txt = $('#txt-comanda');
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.cerrar) return cerrarModal();
+    if (b.dataset.original) { txt.value = l.descripcion; return txt.focus(); }
+    if (b.dataset.com) {
+      const c = b.dataset.com;
+      txt.value = `${txt.value.trim()} ${c.charAt(0).toLowerCase()}${c.slice(1)}`.trim();
+      return;
+    }
+    if (b.dataset.guardar) {
+      E.cuenta = await api('PATCH', `/lineas/${l.id}`, { detalle: txt.value });
+      cerrarModal();
+      return pintarVenta();
+    }
+  });
+}
+
+// Mantener pulsada una línea abre el texto de la comanda; deslizarla a la izquierda muestra Anular.
+const PULSACION_LARGA_MS = 1000;
 let arrastre = null;
 $('#vista').addEventListener('pointerdown', e => {
   const l = e.target.closest('.linea');
   if (!l || E.vista !== 'venta') return;
+  delete l.dataset.arrastrado;
   document.querySelectorAll('.linea.abierta').forEach(x => { if (x !== l) x.classList.remove('abierta'); });
   arrastre = { el: l, x0: e.clientX, y0: e.clientY, dx: 0, base: l.classList.contains('abierta') ? -96 : 0, movido: false };
+  arrastre.larga = setTimeout(() => {
+    if (!arrastre || arrastre.movido) return;
+    l.dataset.arrastrado = '1';   // que el clic de soltar no cambie la selección
+    l.classList.remove('abierta');
+    arrastre = null;
+    editarComanda(Number(l.dataset.linea));
+  }, PULSACION_LARGA_MS);
 });
+$('#vista').addEventListener('contextmenu', e => { if (e.target.closest('.linea')) e.preventDefault(); });
 $('#vista').addEventListener('pointermove', e => {
   if (!arrastre) return;
   const dx = e.clientX - arrastre.x0;
+  if (!arrastre.movido && Math.abs(dx) < 8 && Math.abs(e.clientY - arrastre.y0) < 8) return;
+  clearTimeout(arrastre.larga);
   if (!arrastre.movido && Math.abs(dx) < 8) return;
   if (!arrastre.movido && Math.abs(e.clientY - arrastre.y0) > Math.abs(dx)) { arrastre = null; return; }
   arrastre.movido = true;
@@ -263,6 +315,7 @@ $('#vista').addEventListener('pointermove', e => {
 });
 const soltar = () => {
   if (!arrastre) return;
+  clearTimeout(arrastre.larga);
   const { el, base, dx, movido } = arrastre;
   el.style.transition = '';
   el.style.transform = '';
@@ -542,6 +595,7 @@ const GESTION = {
   ivas: { titulo: 'IVAs', campos: [['nombre', 'Nombre'], ['codigo', 'Código'], ['porcentaje', 'IVA %', 'num'], ['recargo', 'Recargo equivalencia %', 'num'], ['orden', 'Orden', 'num']] },
   puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['orden', 'Orden', 'num']] },
   impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
+  comentarios: { titulo: 'Comentarios de comanda', campos: [['texto', 'Comentario'], ['familia_id', 'Solo familia', 'familias'], ['articulo_id', 'Solo artículo', 'articulos'], ['orden', 'Orden', 'num']] },
   conceptos_pago: { titulo: 'Conceptos de pago', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
   botones: { titulo: 'Botonera', campos: [['texto', 'Texto'], ['accion', 'Acción', 'accion'], ['color', 'Color', 'colorop'], ['orden', 'Orden', 'num'], ['visible', 'Visible', 'bool']] },
 };
@@ -552,7 +606,7 @@ const OPCIONES = {
   tipopuesto: [['tpv', 'TPV'], ['pda', 'PDA camarero'], ['kds', 'Pantalla de cocina']],
   usoimpresora: [['cocina', 'Cocina'], ['barra', 'Barra'], ['tickets', 'Tickets'], ['otro', 'Otro']],
 };
-const REFS = ['familias', 'departamentos', 'zonas', 'impresoras'];
+const REFS = ['familias', 'departamentos', 'zonas', 'impresoras', 'articulos'];
 
 function valorCelda(tipo, v) {
   if (tipo === 'euros') return euros(v);
@@ -669,6 +723,7 @@ const SECCIONES_CONFIG = [
     ['articulos', 'Artículos', 'Precios, IVA y familia'],
     ['familias', 'Familias', 'Colores, orden y subfamilias'],
     ['departamentos', 'Departamentos', 'Agrupan familias (barra, cocina...)'],
+    ['comentarios', 'Comentarios de comanda', 'Con hielo, sin azúcar... por familia o artículo'],
   ]],
   ['Local', [
     ['zonas', 'Zonas', 'Barra, comedor, terraza...'],

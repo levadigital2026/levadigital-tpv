@@ -54,7 +54,8 @@ main { flex: 1; min-height: 0; }
 .linea { display: grid; grid-template-columns: 44px 1fr auto; gap: 8px; padding: 9px 12px; align-items: start; }
 .linea.sel { background: var(--sel); }
 .linea .uds { font-weight: 600; text-align: right; }
-.linea .det { grid-column: 2 / 4; color: var(--suave); font-size: 13px; margin-top: -4px; }
+.linea .det { grid-column: 2 / 4; color: var(--marca); font-size: 13px; font-weight: 600; margin-top: -4px; }
+.linea { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .vacio { color: var(--suave); padding: 24px 12px; text-align: center; }
 .total { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; border-top: 1px solid var(--borde); }
 .total span:last-child { font-size: 30px; font-weight: 700; }
@@ -138,6 +139,15 @@ tr.anulado td { color: var(--suave); text-decoration: line-through; }
 .cobro .formas button.efectivo { background: var(--cobrar); color: #fff; border-color: var(--cobrar); }
 .cobro .teclado { border: 0; padding: 0; }
 .modal h2 { margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--borde); font-size: 18px; display: flex; justify-content: space-between; }
+
+.comanda { display: grid; gap: 10px; padding: 16px; }
+.comanda label { font-weight: 600; }
+.comanda textarea { font: inherit; font-size: 20px; padding: 10px; border: 1px solid var(--borde); border-radius: 10px; resize: vertical; }
+.comanda small { color: var(--suave); }
+.comanda .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.comanda .chips button { padding: 12px 16px; border-radius: 999px; font-weight: 600; background: var(--sel); border-color: var(--sel); color: var(--azul); }
+.comanda .botones-modal { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+.comanda .botones-modal button { padding: 12px 18px; font-weight: 600; }
 
 /* Pantallas estrechas: PDA y móviles */
 @media (max-width: 1100px) {

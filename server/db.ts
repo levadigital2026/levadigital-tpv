@@ -161,6 +161,16 @@ CREATE TABLE IF NOT EXISTS conceptos_pago (
   orden INTEGER NOT NULL DEFAULT 0
 );
 
+-- Comentarios predefinidos para la comanda (con hielo, sin azúcar...).
+-- Sin familia ni artículo valen para todo; si no, solo para esa familia o ese artículo.
+CREATE TABLE IF NOT EXISTS comentarios (
+  id INTEGER PRIMARY KEY,
+  texto TEXT NOT NULL,
+  familia_id INTEGER REFERENCES familias(id) ON DELETE CASCADE,
+  articulo_id INTEGER REFERENCES articulos(id) ON DELETE CASCADE,
+  orden INTEGER NOT NULL DEFAULT 0
+);
+
 -- Botonera de funciones de la pantalla de venta (configurable desde Gestión).
 CREATE TABLE IF NOT EXISTS botones (
   id INTEGER PRIMARY KEY,
@@ -210,6 +220,12 @@ function migrar(db: DB) {
       const c = db.prepare('INSERT INTO conceptos_pago (nombre, orden) VALUES (?, ?)');
       ['Pago a proveedor', 'Cambio de moneda', 'Retirada de efectivo'].forEach((n, i) => c.run(n, i + 1));
     }
+    if (cuenta(db, 'comentarios') === 0) {
+      const c = db.prepare('INSERT INTO comentarios (texto, familia_id, orden) VALUES (?, ?, ?)');
+      ['Para llevar', 'Aparte'].forEach((t, i) => c.run(t, null, 100 + i));
+      const cafes = db.prepare("SELECT id FROM familias WHERE nombre = 'Cafés'").get() as { id: number } | undefined;
+      if (cafes) ['Con hielo', 'Sin azúcar', 'Con sacarina', 'Corto de café', 'Largo de café'].forEach((t, i) => c.run(t, cafes.id, i + 1));
+    }
   });
 }
 
@@ -222,7 +238,7 @@ export const ACCIONES: Record<string, string> = {
   mesas: 'Ir a mesas',
   borrar_linea: 'Borrar línea',
   borrar_todo: 'Borrar todo',
-  detalle: 'Detalle para cocina',
+  detalle: 'Texto de comanda (cocina / barra)',
   comensales: 'Cambiar comensales',
   nombre: 'Nombre de la cuenta',
   efectivo_exacto: 'Cobro rápido en efectivo (importe exacto)',

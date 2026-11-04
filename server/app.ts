@@ -38,6 +38,7 @@ ruta('GET', '/api/inicio', ({ db }) => ({
   formas_cobro: g.listar(db, 'formas_cobro'),
   botones: g.listar(db, 'botones'),
   impresoras: g.listar(db, 'impresoras'),
+  comentarios: g.listar(db, 'comentarios'),
   acciones: ACCIONES,
 }));
 
