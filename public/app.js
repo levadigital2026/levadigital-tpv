@@ -95,7 +95,7 @@ async function pintarVenta() {
   const famActual = E.datos.familias.find(f => f.id === E.familia);
   const subfamilias = E.datos.familias.filter(f => f.padre_id === E.familia);
   const arts = E.datos.articulos.filter(a => a.activo && a.familia_id === E.familia);
-  const colorDe = id => E.datos.familias.find(f => f.id === id)?.color ?? '#1d2b3a';
+  const colorDe = id => E.datos.familias.find(f => f.id === id)?.color ?? '#0064fc';
 
   $('#vista').innerHTML = `
   <div class="venta">
