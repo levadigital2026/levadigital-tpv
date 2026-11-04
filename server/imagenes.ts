@@ -72,6 +72,65 @@ export async function subirImagen(datos: { nombre?: string; datos?: string }) {
   return { ruta: `Propias/${nombre}` };
 }
 
+// Los 14 alérgenos de declaración obligatoria (Reglamento UE 1169/2011).
+// 'archivo' es el icono que se busca en la carpeta "Alergenos" del banco de imágenes.
+export const ALERGENOS: [string, string, string][] = [
+  ['gluten', 'Gluten', 'trigo'], ['crustaceos', 'Crustáceos', 'crustaceo'], ['huevo', 'Huevo', 'huevo'],
+  ['pescado', 'Pescado', 'pescado'], ['cacahuete', 'Cacahuete', 'cacahuete'], ['soja', 'Soja', 'leguminosas'],
+  ['leche', 'Leche', 'leche'], ['frutos_cascara', 'Frutos de cáscara', 'nuez'], ['apio', 'Apio', 'apio'],
+  ['mostaza', 'Mostaza', 'mostaza'], ['sesamo', 'Sésamo', 'sesamo'], ['sulfitos', 'Sulfitos', 'sulfitos'],
+  ['altramuces', 'Altramuces', 'altramuces'], ['moluscos', 'Moluscos', 'moluscos'],
+];
+export const CODIGOS_ALERGENOS = new Set(ALERGENOS.map(a => a[0]));
+
+export async function listaAlergenos() {
+  let archivos: string[] = [];
+  try { archivos = await readdir(join(carpeta, 'Alergenos')); } catch {}
+  return ALERGENOS.map(([codigo, nombre, archivo]) => {
+    const f = archivos.find(x => x.replace(/\.[^.]+$/, '').toLowerCase() === archivo && TIPOS_IMAGEN[extname(x).toLowerCase()]);
+    return { codigo, nombre, imagen: f ? `Alergenos/${f}` : '' };
+  });
+}
+
+// Pasa a minúsculas sin acentos ni signos: "Café con Leche" -> "cafeconleche".
+export const normalizar = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Palabras de un nombre: separa por espacios, signos, números y MayúsculasPegadas ("AguaMineral").
+const VACIAS = new Set(['de', 'del', 'con', 'al', 'a', 'la', 'el', 'los', 'las', 'y', 'en', 'kg', 'ud', 'uds']);
+function palabras(s: string) {
+  return s.replace(/([a-záéíóúñ])([A-ZÁÉÍÓÚÑ])/g, '$1 $2').split(/[^\p{L}]+/u).map(normalizar).filter(w => w.length > 1 && !VACIAS.has(w));
+}
+const igual = (a: string, b: string) => a === b || a.replace(/e?s$/, '') === b.replace(/e?s$/, '');
+
+// Busca en el banco la imagen cuyo nombre de archivo mejor encaja con el nombre del artículo.
+export async function buscarImagenPara(nombre: string): Promise<string | null> {
+  const datos = await listarImagenes() as { carpetas: { nombre: string; imagenes: string[] }[] };
+  const pa = palabras(nombre);
+  if (!pa.length) return null;
+  const juntoA = pa.join('');
+  let mejor: { ruta: string; nota: number } | null = null;
+  for (const c of datos.carpetas) {
+    if (/^alergenos$/i.test(c.nombre)) continue;
+    for (const ruta of c.imagenes) {
+      const pf = palabras(ruta.split('/').pop()!.replace(/\.[^.]+$/, ''));
+      if (!pf.length) continue;
+      const juntoF = pf.join('');
+      let nota = 0;
+      if (igual(juntoF, juntoA)) nota = 100;
+      else if (pa.every(a => pf.some(f => igual(a, f)))) nota = 85 - (pf.length - pa.length) * 5;
+      else if (pf.every(f => pa.some(a => igual(a, f)))) nota = 70 + pf.length / pa.length * 10;
+      else if (juntoA.length >= 5 && juntoF.startsWith(juntoA)) nota = 55;
+      if (nota > (mejor?.nota ?? 0) || (nota === mejor?.nota && ruta.length < mejor.ruta.length)) mejor = { ruta, nota };
+    }
+  }
+  return mejor && mejor.nota >= 55 ? mejor.ruta : null;
+}
+
+export function existeImagen(rel: string) {
+  const r = rel && rutaValida(rel) ? rutaReal(rel) : null;
+  return !!r && existsSync(r);
+}
+
 export async function leerImagen(rel: string) {
   if (!rutaValida(rel)) return null;
   const r = rutaReal(rel);

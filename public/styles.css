@@ -88,7 +88,8 @@ main { flex: 1; min-height: 0; }
 .articulos button { position: relative; overflow: hidden; }
 .articulos .pie { font-style: normal; display: flex; flex-direction: column; justify-content: space-between; gap: 4px; flex: 1; position: relative; }
 .articulos button.con-imagen { padding: 0; justify-content: flex-end; }
-.articulos button.con-imagen img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.articulos button.con-imagen > img { position: absolute; top: 4px; left: 4px; right: 4px; bottom: 24px; width: calc(100% - 8px); height: calc(100% - 28px); object-fit: contain; }
+.articulos button.con-imagen { background-color: var(--bf, #fff); }
 .articulos button.con-imagen .pie { flex: none; flex-direction: row; align-items: baseline; background: rgba(255, 255, 255, .88); padding: 3px 6px; gap: 6px; }
 .articulos button.con-imagen .pie b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--a-articulos_letra, 15px) - 1px); }
 .articulos button.con-imagen .pie span { font-size: 12px; white-space: nowrap; }
@@ -238,6 +239,22 @@ td small { color: var(--suave); }
 .pal-datos input { width: 100%; padding: 6px 8px; }
 .pal-previa { grid-row: 1 / 3; height: 100%; min-height: 76px; border-radius: 8px; border: 1px solid var(--borde); }
 .pal-datos button { grid-column: 2 / 6; padding: 9px; font-weight: 600; }
+
+/* Alérgenos */
+.ico-alerg { width: 22px; height: 22px; object-fit: contain; border-radius: 50%; background: #fff; display: inline-grid; place-items: center; vertical-align: middle; }
+.ico-alerg.txt { font-style: normal; font-size: 10px; font-weight: 700; color: #fff; background: #b45309; }
+.alerg-art { position: absolute; top: 4px; right: 4px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; max-width: 70%; z-index: 1; }
+.alerg-art .ico-alerg { width: 18px; height: 18px; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
+.alerg-tabla { display: flex; flex-wrap: wrap; gap: 2px; max-width: 140px; }
+.alerg-tabla .ico-alerg { width: 18px; height: 18px; }
+.alerg-lista { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 14px; }
+.alerg-nombre { display: inline-flex; align-items: center; gap: 4px; }
+.alerg-ticket { font-size: 11px; margin: -2px 0 4px 14px; }
+.campo-alergenos { display: grid; gap: 6px; font-size: 13px; color: var(--suave); }
+.rejilla-alergenos { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.rejilla-alergenos button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 4px; font-size: 11px; color: var(--tinta); filter: grayscale(1); opacity: .55; }
+.rejilla-alergenos button img, .rejilla-alergenos .ico-alerg { width: 34px; height: 34px; object-fit: contain; }
+.rejilla-alergenos button.activo { filter: none; opacity: 1; background: #fff4e5; border: 2px solid #f59e0b; font-weight: 700; }
 
 /* Ordenar botones: mantener pulsado 3 s */
 @keyframes carga-orden { from { box-shadow: inset 0 -4px 0 0 var(--marca); } to { box-shadow: inset 0 -100px 0 0 rgba(0, 100, 252, .25); } }

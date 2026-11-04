@@ -1,9 +1,9 @@
 // Mantenimiento de tablas: departamentos, familias, artículos, zonas, mesas, formas de cobro y empresa.
 import { type DB, ACCIONES } from './db.ts';
 import { ErrorTPV } from './ventas.ts';
-import { rutaValida } from './imagenes.ts';
+import { rutaValida, CODIGOS_ALERGENOS, buscarImagenPara, existeImagen } from './imagenes.ts';
 
-type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref' | 'imagen' | 'color'; obligatorio?: boolean; valores?: string[] };
+type Campo = { tipo: 'texto' | 'entero' | 'decimal' | 'bool' | 'ref' | 'imagen' | 'color' | 'alergenos'; obligatorio?: boolean; valores?: string[] };
 
 // Campos que se pueden escribir desde la API para cada tabla.
 export const TABLAS: Record<string, Record<string, Campo>> = {
@@ -16,7 +16,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   articulos: {
     nombre: { tipo: 'texto', obligatorio: true }, precio: { tipo: 'entero' }, iva: { tipo: 'decimal' },
     familia_id: { tipo: 'ref' }, grupo_cocina: { tipo: 'entero' }, orden: { tipo: 'entero' }, activo: { tipo: 'bool' },
-    imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' },
+    imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' }, alergenos: { tipo: 'alergenos' },
   },
   zonas: { nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['barra', 'mesas'] }, orden: { tipo: 'entero' } },
   mesas: { zona_id: { tipo: 'ref', obligatorio: true }, nombre: { tipo: 'texto', obligatorio: true }, x: { tipo: 'entero' }, y: { tipo: 'entero' } },
@@ -82,6 +82,12 @@ function limpiar(tabla: string, datos: Record<string, unknown>, nuevo: boolean) 
         const s = String(v ?? '').trim();
         if (s && !rutaValida(s)) throw new ErrorTPV('Imagen no válida');
         out[k] = s;
+        break;
+      }
+      case 'alergenos': {
+        const lista = (Array.isArray(v) ? v : String(v ?? '').split(',')).map(x => String(x).trim()).filter(Boolean);
+        if (lista.some(x => !CODIGOS_ALERGENOS.has(x))) throw new ErrorTPV('Alérgeno desconocido');
+        out[k] = [...new Set(lista)].join(',');
         break;
       }
       case 'color': {
@@ -174,6 +180,24 @@ export function ordenar(db: DB, tabla: string, datos: { ids?: unknown }) {
     throw e;
   }
   return { ordenados: ids.length };
+}
+
+// Pone imagen a los artículos que no la tienen (o cuya imagen ya no existe) buscando por el nombre.
+export async function imagenesAutomaticas(db: DB, datos: { todos?: boolean }) {
+  const arts = db.prepare('SELECT id, nombre, imagen FROM articulos WHERE activo = 1 ORDER BY nombre').all() as { id: number; nombre: string; imagen: string }[];
+  const puestas: { nombre: string; imagen: string }[] = [];
+  const sin: string[] = [];
+  const upd = db.prepare('UPDATE articulos SET imagen = ? WHERE id = ?');
+  for (const a of arts) {
+    if (!datos?.todos && a.imagen && existeImagen(a.imagen)) continue;
+    const r = await buscarImagenPara(a.nombre);
+    if (r) { upd.run(r, a.id); puestas.push({ nombre: a.nombre, imagen: r }); }
+    else {
+      if (a.imagen && !existeImagen(a.imagen)) upd.run('', a.id);
+      sin.push(a.nombre);
+    }
+  }
+  return { puestas, sin };
 }
 
 export function borrar(db: DB, tabla: string, id: number) {

@@ -95,12 +95,25 @@ function estiloBoton(x, acento) {
 }
 function botonFamilia(f, clasesExtra, contenido) {
   const { clases, estilo } = estiloBoton(f, f.color);
-  return `<button data-familia="${f.id}" style="${estilo}" class="${clases} ${clasesExtra}">${f.imagen ? `<img class="mini" src="${esc(urlImagen(f.imagen))}" alt="" loading="lazy">` : ''}<span class="nom">${esc(f.nombre)}</span>${contenido ?? ''}</button>`;
+  return `<button data-familia="${f.id}" style="${estilo}" class="${clases} ${clasesExtra}">${f.imagen ? `<img class="mini" src="${esc(urlImagen(f.imagen))}" alt="" loading="lazy" onerror="this.remove()">` : ''}<span class="nom">${esc(f.nombre)}</span>${contenido ?? ''}</button>`;
 }
+const SIN_IMAGEN = `onerror="this.parentElement.classList.remove('con-imagen');this.remove()"`;
 function botonArticulo(a, acento, subtitulo, dato = `data-articulo="${a.id}"`) {
   const { clases, estilo } = estiloBoton(a, acento);
-  return `<button ${dato} style="${estilo}" class="${clases}">${a.imagen ? `<img src="${esc(urlImagen(a.imagen))}" alt="" loading="lazy">` : ''}<em class="pie"><b>${esc(a.nombre)}</b><span>${subtitulo}</span></em></button>`;
+  return `<button ${dato} style="${estilo}" class="${clases}">${a.imagen ? `<img src="${esc(urlImagen(a.imagen))}" alt="" loading="lazy" ${SIN_IMAGEN}>` : ''}${a.alergenos ? `<span class="alerg-art">${iconosAlergenos(a.alergenos)}</span>` : ''}<em class="pie"><b>${esc(a.nombre)}</b><span>${subtitulo}</span></em></button>`;
 }
+
+// Alérgenos: icono de la carpeta "Alergenos" del banco o, si falta, una etiqueta con el nombre.
+const alergeno = c => E.datos.alergenos?.find(a => a.codigo === c);
+function iconosAlergenos(codigos, conNombre = false) {
+  return String(codigos || '').split(',').filter(Boolean).map(c => {
+    const a = alergeno(c);
+    if (!a) return '';
+    const icono = a.imagen ? `<img class="ico-alerg" src="${esc(urlImagen(a.imagen))}" alt="${esc(a.nombre)}" title="${esc(a.nombre)}">` : `<i class="ico-alerg txt" title="${esc(a.nombre)}">${esc(a.nombre.slice(0, 2))}</i>`;
+    return conNombre ? `<span class="alerg-nombre">${icono}${esc(a.nombre)}</span>` : icono;
+  }).join('');
+}
+const nombresAlergenos = codigos => String(codigos || '').split(',').map(c => alergeno(c)?.nombre).filter(Boolean).join(', ');
 
 // Columna de familias: las principales o, al entrar en una familia con subfamilias, sus subfamilias.
 function columnaFamilias() {
@@ -315,6 +328,7 @@ function editarComanda(id) {
       <label>Texto para cocina / barra</label>
       <textarea id="txt-comanda" rows="2" maxlength="200">${esc(l.detalle || l.descripcion)}</textarea>
       <small>En el ticket del cliente saldrá: <b>${esc(l.descripcion)}</b></small>
+      ${(() => { const al = E.datos.articulos.find(a => a.id === l.articulo_id)?.alergenos; return al ? `<div class="alerg-lista"><b>Alérgenos:</b> ${iconosAlergenos(al, true)}</div>` : ''; })()}
       ${coms.length ? `<div class="chips">${coms.map(c => `<button data-com="${esc(c.texto)}">${esc(c.texto)}</button>`).join('')}</div>` : ''}
       <div class="botones-modal">
         <button data-original="1">Restaurar original</button>
@@ -582,7 +596,7 @@ function htmlTicket(t, titulo) {
     <div class="c">${esc(titulo)}</div>
     <div>${esc(t.serie)}-${t.numero} · ${hora(t.emitido_en)}</div>
     ${t.mesa_nombre ? `<div>${esc(t.zona_nombre)} · ${esc(t.mesa_nombre)}</div>` : ''}<hr>
-    ${t.lineas.map(l => `<div class="fila"><span>${uds(l.unidades)} ${esc(l.descripcion)}</span><span>${euros(l.importe)}</span></div>`).join('')}<hr>
+    ${t.lineas.map(l => `<div class="fila"><span>${uds(l.unidades)} ${esc(l.descripcion)}</span><span>${euros(l.importe)}</span></div>${l.alergenos ? `<div class="alerg-ticket">Alérgenos: ${esc(l.alergenos)}</div>` : ''}`).join('')}<hr>
     <div class="fila grande"><span>TOTAL</span><span>${euros(t.total)}</span></div>
     ${t.impuestos.map(i => `<div class="fila"><span>Base ${i.iva}%: ${euros(i.base)}</span><span>IVA ${euros(i.cuota)}</span></div>`).join('')}<hr>
     <div class="fila"><span>${esc(t.forma_cobro)}</span><span>${euros(t.entregado)}</span></div>
@@ -607,7 +621,7 @@ function verPreticket() {
   const c = E.cuenta;
   const pre = {
     empresa: E.datos.empresa, serie: 'PRE', numero: c.id, emitido_en: new Date().toISOString(), mesa_nombre: c.mesa_nombre, zona_nombre: c.zona_nombre,
-    lineas: c.lineas.map(l => ({ ...l, importe: Math.round(l.unidades * l.precio) })), total: c.total, impuestos: [],
+    lineas: c.lineas.map(l => ({ ...l, importe: Math.round(l.unidades * l.precio), alergenos: nombresAlergenos(E.datos.articulos.find(a => a.id === l.articulo_id)?.alergenos) })), total: c.total, impuestos: [],
     forma_cobro: 'Pendiente', entregado: 0, cambio: 0,
   };
   abrirModal(`<h2><span>Pre-ticket</span><button data-m="cerrar">✕</button></h2>
@@ -737,7 +751,7 @@ async function pintarCaja() {
 
 // ---------- Gestión ----------
 const GESTION = {
-  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['grupo_cocina', 'Grupo cocina', 'grupo'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop']] },
+  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['grupo_cocina', 'Grupo cocina', 'grupo'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'], ['alergenos', 'Alérgenos', 'alergenos']] },
   familias: { titulo: 'Familias', campos: [['nombre', 'Nombre'], ['color', 'Color', 'color'], ['padre_id', 'Subfamilia de', 'familias'], ['departamento_id', 'Departamento', 'departamentos'], ['orden', 'Orden', 'num'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop']] },
   departamentos: { titulo: 'Departamentos', campos: [['nombre', 'Nombre']] },
   zonas: { titulo: 'Zonas', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipozona'], ['orden', 'Orden', 'num']] },
@@ -769,13 +783,20 @@ function valorCelda(tipo, v) {
   if (tipo === 'accion') return esc(E.datos.acciones[v] ?? v);
   if (tipo === 'colorop') return v ? `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>` : 'Normal';
   if (tipo === 'color') return `<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${esc(v)}"></span>`;
-  if (tipo === 'imagen') return v ? `<img class="mini-tabla" src="${esc(urlImagen(v))}" alt="" loading="lazy">` : '';
+  if (tipo === 'imagen') return v ? `<img class="mini-tabla" src="${esc(urlImagen(v))}" alt="" loading="lazy" onerror="this.replaceWith('—')">` : '';
+  if (tipo === 'alergenos') return `<span class="alerg-tabla">${iconosAlergenos(v)}</span>`;
   return esc(v);
 }
 
 function campoForm([k, etiqueta, tipo], fila) {
   const v = fila?.[k];
   if (tipo === 'bool') return `<label><span>${etiqueta}</span><select name="${k}"><option value="1" ${v !== 0 ? 'selected' : ''}>Sí</option><option value="0" ${v === 0 ? 'selected' : ''}>No</option></select></label>`;
+  if (tipo === 'alergenos') {
+    const sel = new Set(String(v || '').split(',').filter(Boolean));
+    return `<div class="campo-alergenos"><span>${etiqueta}</span><input type="hidden" name="${k}" value="${esc(v ?? '')}">
+      <div class="rejilla-alergenos">${(E.datos.alergenos ?? []).map(a => `<button type="button" data-alergeno="${a.codigo}" class="${sel.has(a.codigo) ? 'activo' : ''}">
+        ${a.imagen ? `<img src="${esc(urlImagen(a.imagen))}" alt="">` : `<i class="ico-alerg txt">${esc(a.nombre.slice(0, 2))}</i>`}<span>${esc(a.nombre)}</span></button>`).join('')}</div></div>`;
+  }
   if (tipo === 'imagen') return `<div class="campo-imagen"><span>${etiqueta}</span><input type="hidden" name="${k}" value="${esc(v ?? '')}">
     <div class="vista-imagen" data-elegir-imagen="${k}">${v ? `<img src="${esc(urlImagen(v))}" alt="">` : '<small>Sin imagen</small>'}</div>
     <div class="botones" style="padding:0"><button type="button" data-elegir-imagen="${k}">Elegir imagen</button>${v ? `<button type="button" data-quitar-imagen="${k}">Quitar</button>` : ''}</div></div>`;
@@ -794,7 +815,8 @@ async function pintarGestion(editar) {
     ${cabeceraConfig(def.titulo)}
     <div class="dos-col" style="padding:0;flex:1;min-height:0">
       <section class="panel scroll">
-        <div class="botones"><button class="primario" data-editar="nuevo">+ Añadir</button></div>
+        <div class="botones"><button class="primario" data-editar="nuevo">+ Añadir</button>
+          ${E.tablaGestion === 'articulos' ? '<button data-auto-imagenes="1" title="Busca en el banco una imagen con el mismo nombre que el artículo">Poner imágenes automáticamente</button>' : ''}</div>
         <table><thead><tr>${def.campos.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>
         ${filas.map(f => `<tr class="clic ${f.id === editar ? 'sel' : ''}" data-editar="${f.id}">${def.campos.map(([k, , t]) => `<td>${valorCelda(t, f[k])}</td>`).join('')}</tr>`).join('')}
         </tbody></table>
@@ -809,9 +831,26 @@ async function pintarGestion(editar) {
     </div></div>`;
 
   $('#vista').onclick = e => intentar(async () => {
-    const b = e.target.closest('[data-volver],[data-editar],#b-borrar,[data-elegir-imagen],[data-quitar-imagen]');
+    const b = e.target.closest('[data-volver],[data-editar],#b-borrar,[data-elegir-imagen],[data-quitar-imagen],[data-alergeno],[data-auto-imagenes]');
     if (!b) return;
     if (b.dataset.volver) return ir('config');
+    if (b.dataset.alergeno) {
+      b.classList.toggle('activo');
+      const caja = b.closest('.campo-alergenos');
+      caja.querySelector('input').value = [...caja.querySelectorAll('[data-alergeno].activo')].map(x => x.dataset.alergeno).join(',');
+      return;
+    }
+    if (b.dataset.autoImagenes) {
+      if (!confirm('¿Buscar en el banco una imagen para cada artículo que no tenga? Las imágenes que ya has puesto no se cambian.')) return;
+      const r = await api('POST', '/imagenes/asignar', {});
+      await cargarDatos();
+      await pintarGestion(editar);
+      abrirModal(`<h2><span>Imágenes automáticas</span><button data-m="cerrar" onclick="this.closest('#modal').click()">✕</button></h2>
+        <div class="form"><p><b>${r.puestas.length}</b> artículos con imagen nueva${r.puestas.length ? ': ' + r.puestas.map(x => esc(x.nombre)).join(', ') : ''}.</p>
+        ${r.sin.length ? `<p class="nota">Sin imagen parecida (${r.sin.length}): ${r.sin.map(esc).join(', ')}. Puedes elegirlas a mano.</p>` : ''}</div>`);
+      $('#modal-caja').onclick = ev => { if (ev.target.closest('[data-m="cerrar"]')) cerrarModal(); };
+      return;
+    }
     if (b.dataset.elegirImagen || b.dataset.quitarImagen) {
       const k = b.dataset.elegirImagen || b.dataset.quitarImagen;
       const input = $('#f-gestion').elements[k];
@@ -1147,8 +1186,8 @@ function elegirImagen(actual = '') {
   }));
 }
 
-// Reduce la foto a un máximo de 600 px para que el TPV vaya ligero.
-function reducirImagen(archivo, max = 600) {
+// Reduce la foto a un máximo de 320 px para que el TPV vaya ligero.
+function reducirImagen(archivo, max = 320) {
   return new Promise((ok, mal) => {
     const img = new Image();
     img.onload = () => {
@@ -1158,7 +1197,9 @@ function reducirImagen(archivo, max = 600) {
       const ctx = c.getContext('2d');
       ctx.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(img.src);
-      ok(archivo.type === 'image/png' ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85));
+      // WEBP a 320 px: unos 10-20 KB por imagen.
+      const webp = c.toDataURL('image/webp', 0.82);
+      ok(webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/jpeg', 0.82));
     };
     img.onerror = () => mal(new Error('No se ha podido leer la imagen'));
     img.src = URL.createObjectURL(archivo);

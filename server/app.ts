@@ -7,7 +7,7 @@ import { type DB, ACCIONES } from './db.ts';
 import * as v from './ventas.ts';
 import * as g from './gestion.ts';
 import { registrar, describir, leerRegistro } from './registro.ts';
-import { listarImagenes, subirImagen, leerImagen } from './imagenes.ts';
+import { listarImagenes, subirImagen, leerImagen, listaAlergenos } from './imagenes.ts';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TIPOS: Record<string, string> = {
@@ -30,7 +30,8 @@ const num = (s: string) => {
 };
 
 // Datos para pintar el TPV de una vez.
-ruta('GET', '/api/inicio', ({ db }) => ({
+ruta('GET', '/api/inicio', async ({ db }) => ({
+  alergenos: await listaAlergenos(),
   empresa: g.getEmpresa(db),
   departamentos: g.listar(db, 'departamentos'),
   familias: g.listar(db, 'familias'),
@@ -68,6 +69,7 @@ ruta('GET', '/api/registro', ({ db, url }) => leerRegistro(db, url.searchParams.
 
 ruta('GET', '/api/imagenes', () => listarImagenes());
 ruta('POST', '/api/imagenes', ({ body }) => subirImagen(body));
+ruta('POST', '/api/imagenes/asignar', ({ db, body }) => g.imagenesAutomaticas(db, body));
 ruta('GET', '/api/aspecto', ({ db }) => g.getAspecto(db));
 ruta('PUT', '/api/aspecto', ({ db, body }) => g.setAspecto(db, body));
 ruta('GET', '/api/empresa', ({ db }) => g.getEmpresa(db));

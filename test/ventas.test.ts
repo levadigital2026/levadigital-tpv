@@ -278,3 +278,32 @@ test('ordenar: guarda el orden nuevo de artículos y rechaza tablas sin orden', 
     assert.equal((await api('POST', '/gestion/botones/ordenar', { ids: [1, 1] })).status, 400);
   } finally { await cerrar(); }
 });
+
+test('alérgenos e imágenes automáticas', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { usarCarpetaImagenes } = await import('../server/imagenes.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'img-'));
+  mkdirSync(join(dir, 'Alergenos')); mkdirSync(join(dir, 'articulos'));
+  for (const f of ['Alergenos/trigo.png', 'Alergenos/leche.png', 'articulos/ColaCao.bmp', 'articulos/cafesolo2.bmp', 'articulos/rabas.bmp']) writeFileSync(join(dir, f), 'x');
+  usarCarpetaImagenes(dir);
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    assert.equal(ini.alergenos.length, 14);
+    assert.equal(ini.alergenos.find((a: any) => a.codigo === 'gluten').imagen, 'Alergenos/trigo.png');
+    assert.equal(ini.alergenos.find((a: any) => a.codigo === 'sesamo').imagen, '');
+    const rabas = ini.articulos.find((a: any) => a.nombre === 'Rabas');
+    const r = (await api('PUT', `/gestion/articulos/${rabas.id}`, { alergenos: 'gluten,pescado,gluten' })).data;
+    assert.equal(r.alergenos, 'gluten,pescado');
+    assert.equal((await api('PUT', `/gestion/articulos/${rabas.id}`, { alergenos: 'polen' })).status, 400);
+
+    const auto = (await api('POST', '/imagenes/asignar', {})).data;
+    const puestas = Object.fromEntries(auto.puestas.map((x: any) => [x.nombre, x.imagen]));
+    assert.equal(puestas['Colacao'], 'articulos/ColaCao.bmp');
+    assert.equal(puestas['Café solo'], 'articulos/cafesolo2.bmp');
+    assert.equal(puestas['Rabas'], 'articulos/rabas.bmp');
+    assert.ok(auto.sin.includes('Txakoli'));
+  } finally { await cerrar(); }
+});

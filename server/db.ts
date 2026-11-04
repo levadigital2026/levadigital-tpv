@@ -252,6 +252,8 @@ function migrar(db: DB) {
     anadirColumna(db, t, 'color_fondo', "TEXT NOT NULL DEFAULT ''");
     anadirColumna(db, t, 'color_texto', "TEXT NOT NULL DEFAULT ''");
   }
+  // Alérgenos del artículo: códigos separados por comas (gluten,leche...).
+  anadirColumna(db, 'articulos', 'alergenos', "TEXT NOT NULL DEFAULT ''");
   tx(db, () => {
     if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'configuracion'").get()) {
       db.prepare("INSERT INTO botones (accion, texto, color, orden, visible) VALUES ('configuracion', 'Configuración', '#0b1527', 0, 1)").run();
