@@ -239,6 +239,13 @@ td small { color: var(--suave); }
 .pal-previa { grid-row: 1 / 3; height: 100%; min-height: 76px; border-radius: 8px; border: 1px solid var(--borde); }
 .pal-datos button { grid-column: 2 / 6; padding: 9px; font-weight: 600; }
 
+/* Ordenar botones: mantener pulsado 3 s */
+@keyframes carga-orden { from { box-shadow: inset 0 -4px 0 0 var(--marca); } to { box-shadow: inset 0 -100px 0 0 rgba(0, 100, 252, .25); } }
+.venta button.cargando-orden { animation: carga-orden 2.4s linear .6s both; }
+.venta button.moviendo { outline: 3px dashed var(--marca); outline-offset: 2px; transform: scale(1.06); box-shadow: 0 8px 24px rgba(0, 0, 0, .25); z-index: 2; position: relative; }
+.ordenando { touch-action: none; }
+.ordenando > :not(.moviendo):not(:has(.moviendo)) { opacity: .75; }
+
 /* Pantallas estrechas: PDA y móviles */
 @media (max-width: 760px) {
   .paleta { grid-template-columns: 1fr; }

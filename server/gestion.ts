@@ -158,6 +158,24 @@ export function actualizar(db: DB, tabla: string, id: number, datos: Record<stri
   return fila;
 }
 
+// Guarda un orden nuevo: el primer id pasa a orden 1, el segundo a 2...
+export function ordenar(db: DB, tabla: string, datos: { ids?: unknown }) {
+  comprobarTabla(tabla);
+  if (!('orden' in TABLAS[tabla])) throw new ErrorTPV('Esta tabla no se puede ordenar');
+  const ids = Array.isArray(datos?.ids) ? datos.ids.map(Number) : [];
+  if (!ids.length || ids.some(n => !Number.isInteger(n)) || new Set(ids).size !== ids.length) throw new ErrorTPV('Lista de orden no válida');
+  const upd = db.prepare(`UPDATE ${tabla} SET orden = ? WHERE id = ?`);
+  db.exec('BEGIN');
+  try {
+    ids.forEach((id, i) => upd.run(i + 1, id));
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return { ordenados: ids.length };
+}
+
 export function borrar(db: DB, tabla: string, id: number) {
   comprobarTabla(tabla);
   protegerConfiguracion(db, tabla, id);

@@ -181,7 +181,7 @@ async function pintarVenta() {
           `<button data-tecla="${k}">${k}</button>`).join('')}
       </div>
       <div class="acciones">
-        ${E.datos.botones.filter(b => b.visible).map(b => `<button data-accion="${esc(b.accion)}" ${b.color ? `class="color" style="--bc:${esc(b.color)}"` : ''}
+        ${E.datos.botones.filter(b => b.visible).map(b => `<button data-accion="${esc(b.accion)}" data-id="${b.id}" ${b.color ? `class="color" style="--bc:${esc(b.color)}"` : ''}
           ${accionActiva(b.accion, c) ? '' : 'disabled'} title="${esc(b.texto)}">${b.accion === 'configuracion' ? ICONO_HERRAMIENTAS : esc(b.texto)}</button>`).join('')}
       </div>
       <div class="fila-cobrar"><button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}>Cobrar ${c?.lineas.length ? euros(c.total) : ''}</button></div>
@@ -400,8 +400,90 @@ async function guardarCuenta() {
   return pintarVenta();
 }
 
+// ---------- Ordenar botones arrastrando ----------
+// Mantener pulsado 3 segundos un botón de la botonera, una familia o un artículo lo "suelta";
+// después se arrastra a su nuevo sitio y al levantar el dedo se guarda el orden.
+const PULSACION_ORDENAR_MS = 3000;
+let orden = null;
+function grupoOrdenable(el) {
+  const acc = el.closest('.acciones [data-accion]');
+  if (acc) return { tabla: 'botones', cont: acc.parentElement, item: acc, items: () => [...acc.parentElement.querySelectorAll(':scope > [data-accion]')], id: x => x.dataset.id };
+  const art = el.closest('.articulos [data-articulo]');
+  if (art) return { tabla: 'articulos', cont: art.parentElement, item: art, items: () => [...art.parentElement.querySelectorAll(':scope > [data-articulo]')], id: x => x.dataset.articulo };
+  const fam = el.closest('.familias [data-familia]');
+  if (fam && !fam.classList.contains('padre-fam')) {
+    const item = fam.parentElement.classList.contains('sub-fam') ? fam.parentElement : fam;
+    const cont = item.parentElement;
+    const items = () => [...cont.children].filter(x => (x.matches('[data-familia]') && !x.classList.contains('padre-fam')) || x.classList.contains('sub-fam'));
+    return { tabla: 'familias', cont, item, items, id: x => (x.dataset.familia ?? x.querySelector('[data-familia]').dataset.familia) };
+  }
+  return null;
+}
+$('#vista').addEventListener('pointerdown', e => {
+  if (E.vista !== 'venta' || orden?.activo) return;
+  const g = grupoOrdenable(e.target);
+  if (!g) return;
+  const boton = g.item.matches('button') ? g.item : g.item.querySelector('button');
+  boton.classList.add('cargando-orden');
+  orden = { ...g, boton, x0: e.clientX, y0: e.clientY, activo: false };
+  orden.t = setTimeout(() => {
+    if (!orden) return;
+    orden.activo = true;
+    orden.inicial = orden.items().map(orden.id).join(',');
+    boton.classList.remove('cargando-orden');
+    boton.classList.add('moviendo');
+    orden.cont.classList.add('ordenando');
+    navigator.vibrate?.(60);
+    aviso('Arrastra el botón a su nuevo sitio y suelta');
+  }, PULSACION_ORDENAR_MS);
+});
+function cancelarPulsacion() {
+  if (!orden || orden.activo) return;
+  clearTimeout(orden.t);
+  orden.boton.classList.remove('cargando-orden');
+  orden = null;
+}
+document.addEventListener('pointermove', e => {
+  if (!orden) return;
+  if (!orden.activo) {
+    if (Math.hypot(e.clientX - orden.x0, e.clientY - orden.y0) > 10) cancelarPulsacion();
+    return;
+  }
+  const bajo = document.elementFromPoint(e.clientX, e.clientY);
+  const destino = bajo && orden.items().find(x => x.contains(bajo));
+  if (!destino || destino === orden.item) return;
+  const r = destino.getBoundingClientRect();
+  const enColumna = getComputedStyle(orden.cont).flexDirection === 'column';
+  const antes = enColumna ? e.clientY < r.top + r.height / 2 : e.clientX < r.left + r.width / 2;
+  orden.cont.insertBefore(orden.item, antes ? destino : destino.nextSibling);
+});
+// Mientras se arrastra, que la pantalla no haga scroll.
+document.addEventListener('touchmove', e => { if (orden?.activo) e.preventDefault(); }, { passive: false });
+document.addEventListener('contextmenu', e => { if (orden || e.target.closest('.venta .acciones, .venta .familias, .venta .articulos')) e.preventDefault(); });
+async function soltarOrden() {
+  if (!orden) return;
+  if (!orden.activo) return cancelarPulsacion();
+  const o = orden;
+  orden = null;
+  E.sinClic = Date.now();
+  o.boton.classList.remove('moviendo');
+  o.cont.classList.remove('ordenando');
+  const ids = o.items().map(o.id).map(Number);
+  if (ids.join(',') === o.inicial) return;
+  await intentar(async () => {
+    await api('POST', `/gestion/${o.tabla}/ordenar`, { ids });
+    await cargarDatos();
+    aviso('Orden guardado');
+  });
+  return pintarVenta();
+}
+document.addEventListener('pointerup', () => soltarOrden());
+document.addEventListener('pointercancel', () => soltarOrden());
+
 $('#vista').addEventListener('click', e => intentar(async () => {
   if (E.vista !== 'venta') return;
+  // El clic que llega al soltar un botón que se estaba moviendo no cuenta.
+  if (Date.now() - (E.sinClic ?? 0) < 600) return;
   const b = e.target.closest('[data-familia],[data-articulo],[data-cuenta],[data-tecla],[data-anular],[data-linea],[data-accion],button');
   if (!b) return;
   if (b.dataset.familia) {

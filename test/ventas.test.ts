@@ -264,3 +264,17 @@ test('imágenes: subir, validar ruta y servir', async () => {
     assert.equal((await api('PUT', `/gestion/articulos/${art.id}`, { color_texto: 'rojo' })).status, 400);
   } finally { await cerrar(); }
 });
+
+test('ordenar: guarda el orden nuevo de artículos y rechaza tablas sin orden', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const cafe = ini.articulos.find((a: any) => a.nombre === 'Café solo');
+    const ids = ini.articulos.filter((a: any) => a.familia_id === cafe.familia_id).map((a: any) => a.id).reverse();
+    assert.deepEqual((await api('POST', '/gestion/articulos/ordenar', { ids })).data, { ordenados: ids.length });
+    const despues = (await api('GET', '/inicio')).data.articulos.filter((a: any) => a.familia_id === cafe.familia_id).map((a: any) => a.id);
+    assert.deepEqual(despues, ids);
+    assert.equal((await api('POST', '/gestion/operarios/ordenar', { ids: [1] })).status, 400);
+    assert.equal((await api('POST', '/gestion/botones/ordenar', { ids: [1, 1] })).status, 400);
+  } finally { await cerrar(); }
+});

@@ -75,6 +75,7 @@ ruta('PUT', '/api/empresa', ({ db, body }) => g.setEmpresa(db, body));
 ruta('GET', '/api/gestion/:tabla', ({ db, params }) => g.listar(db, params[0]));
 ruta('POST', '/api/gestion/:tabla', ({ db, params, body }) => g.crear(db, params[0], body));
 ruta('PUT', '/api/gestion/:tabla/:id', ({ db, params, body }) => g.actualizar(db, params[0], num(params[1]), body));
+ruta('POST', '/api/gestion/:tabla/ordenar', ({ db, params, body }) => g.ordenar(db, params[0], body));
 ruta('DELETE', '/api/gestion/:tabla/:id', ({ db, params }) => g.borrar(db, params[0], num(params[1])));
 
 // Avisos a todos los puestos conectados (TPV, PDA, KDS) cuando algo cambia.

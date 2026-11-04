@@ -25,6 +25,7 @@ const ACCIONES: [string, RegExp, string][] = [
   ['PUT', /^\/api\/empresa$/, 'Cambiar datos de empresa'],
   ['PUT', /^\/api\/aspecto$/, 'Cambiar aspecto de la pantalla'],
   ['POST', /^\/api\/imagenes$/, 'Subir imagen'],
+  ['POST', /^\/api\/gestion\/(\w+)\/ordenar$/, 'Configuración: cambiar el orden de $1'],
   ['POST', /^\/api\/gestion\/(\w+)$/, 'Configuración: crear en $1'],
   ['PUT', /^\/api\/gestion\/(\w+)\/\d+$/, 'Configuración: modificar $1'],
   ['DELETE', /^\/api\/gestion\/(\w+)\/\d+$/, 'Configuración: borrar en $1'],
