@@ -1,6 +1,7 @@
 // Base de datos local del TPV (SQLite, un solo archivo, sin instalar nada).
 // Todos los importes se guardan en céntimos (enteros) para evitar errores de redondeo.
 import { DatabaseSync } from 'node:sqlite';
+import { randomBytes } from 'node:crypto';
 
 export type DB = DatabaseSync;
 
@@ -238,6 +239,99 @@ CREATE TABLE IF NOT EXISTS botones (
   visible INTEGER NOT NULL DEFAULT 1
 );
 
+-- Cobros de cada ticket: un ticket se puede pagar con varias formas (6 € en efectivo y 4 € con tarjeta).
+CREATE TABLE IF NOT EXISTS ticket_pagos (
+  id INTEGER PRIMARY KEY,
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+  forma_cobro_id INTEGER NOT NULL REFERENCES formas_cobro(id),
+  importe INTEGER NOT NULL,          -- lo que se aplica al ticket
+  entregado INTEGER NOT NULL,        -- lo que dio el cliente
+  cambio INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ticket_pagos_ticket ON ticket_pagos (ticket_id);
+
+-- Clientes (datos fiscales para la factura, ficha con ventas).
+CREATE TABLE IF NOT EXISTS clientes (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,              -- nombre fiscal o razón social
+  apellidos TEXT NOT NULL DEFAULT '',
+  apodo TEXT NOT NULL DEFAULT '',
+  nif TEXT NOT NULL DEFAULT '',
+  tipo_nif TEXT NOT NULL DEFAULT 'nif',
+  pais TEXT NOT NULL DEFAULT 'ES',
+  domicilio TEXT NOT NULL DEFAULT '',
+  localidad TEXT NOT NULL DEFAULT '',
+  cp TEXT NOT NULL DEFAULT '',
+  provincia TEXT NOT NULL DEFAULT '',
+  telefono TEXT NOT NULL DEFAULT '',
+  telefono2 TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  observaciones TEXT NOT NULL DEFAULT '',
+  descuento REAL NOT NULL DEFAULT 0,
+  tarjeta TEXT NOT NULL DEFAULT '',
+  creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Facturas completas hechas a partir de tickets (factura simplificada) de un cliente.
+CREATE TABLE IF NOT EXISTS facturas (
+  id INTEGER PRIMARY KEY,
+  serie TEXT NOT NULL,
+  numero INTEGER NOT NULL,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  cliente_id INTEGER REFERENCES clientes(id),
+  cliente TEXT NOT NULL,             -- datos fiscales del cliente en el momento de la factura (JSON)
+  total INTEGER NOT NULL,
+  desde TEXT NOT NULL DEFAULT '',
+  hasta TEXT NOT NULL DEFAULT '',
+  operario TEXT NOT NULL DEFAULT '',
+  UNIQUE (serie, numero)
+);
+CREATE TABLE IF NOT EXISTS factura_tickets (
+  factura_id INTEGER NOT NULL REFERENCES facturas(id),
+  ticket_id INTEGER NOT NULL UNIQUE REFERENCES tickets(id)
+);
+
+-- Stocks: proveedores, albaranes de compra y movimientos (+ compras, - ventas, ajustes).
+CREATE TABLE IF NOT EXISTS proveedores (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  nif TEXT NOT NULL DEFAULT '',
+  telefono TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  direccion TEXT NOT NULL DEFAULT '',
+  contacto TEXT NOT NULL DEFAULT '',
+  observaciones TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS albaranes (
+  id INTEGER PRIMARY KEY,
+  proveedor_id INTEGER REFERENCES proveedores(id),
+  proveedor TEXT NOT NULL DEFAULT '',
+  numero TEXT NOT NULL DEFAULT '',
+  fecha TEXT NOT NULL,
+  total INTEGER NOT NULL DEFAULT 0,  -- coste total en céntimos
+  notas TEXT NOT NULL DEFAULT '',
+  operario TEXT NOT NULL DEFAULT '',
+  creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE TABLE IF NOT EXISTS albaran_lineas (
+  id INTEGER PRIMARY KEY,
+  albaran_id INTEGER NOT NULL REFERENCES albaranes(id) ON DELETE CASCADE,
+  articulo_id INTEGER,
+  descripcion TEXT NOT NULL,
+  cantidad REAL NOT NULL,
+  coste INTEGER NOT NULL DEFAULT 0   -- coste por unidad en céntimos
+);
+CREATE TABLE IF NOT EXISTS stock_movimientos (
+  id INTEGER PRIMARY KEY,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  articulo_id INTEGER NOT NULL,
+  cantidad REAL NOT NULL,
+  tipo TEXT NOT NULL CHECK (tipo IN ('compra', 'venta', 'ajuste')),
+  ref_id INTEGER,
+  nota TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS stock_mov_articulo ON stock_movimientos (articulo_id);
+
 CREATE TABLE IF NOT EXISTS empresa (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   nombre TEXT NOT NULL DEFAULT 'Mi local',
@@ -300,6 +394,31 @@ function migrar(db: DB) {
   anadirColumna(db, 'cierres', 'ciego', 'INTEGER NOT NULL DEFAULT 0');
   anadirColumna(db, 'cierres', 'secciones', "TEXT NOT NULL DEFAULT ''");
   anadirColumna(db, 'borrados', 'cierre_id', 'INTEGER');
+  // Series por puesto (varios negocios con el mismo NIF no pueden repetir número) y email del puesto.
+  anadirColumna(db, 'puestos', 'serie_tickets', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'puestos', 'serie_facturas', "TEXT NOT NULL DEFAULT ''");
+  for (const [c, def] of [['email_cierre', "TEXT NOT NULL DEFAULT ''"], ['mail_en_cierre', 'INTEGER NOT NULL DEFAULT 0'],
+    ['smtp_servidor', "TEXT NOT NULL DEFAULT ''"], ['smtp_puerto', 'INTEGER NOT NULL DEFAULT 587'], ['smtp_cifrado', "TEXT NOT NULL DEFAULT 'tls'"],
+    ['smtp_usuario', "TEXT NOT NULL DEFAULT ''"], ['smtp_clave', "TEXT NOT NULL DEFAULT ''"], ['email_emisor', "TEXT NOT NULL DEFAULT ''"],
+    ['email_asunto', "TEXT NOT NULL DEFAULT ''"], ['email_encabezado', "TEXT NOT NULL DEFAULT ''"], ['email_pie', "TEXT NOT NULL DEFAULT ''"]]) {
+    anadirColumna(db, 'puestos', c, def);
+  }
+  anadirColumna(db, 'empresa', 'serie_facturas', "TEXT NOT NULL DEFAULT 'F'");
+  anadirColumna(db, 'empresa', 'instalacion', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'empresa', 'licencia', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'empresa', 'localidad', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'empresa', 'telefono', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'empresa', 'email', "TEXT NOT NULL DEFAULT ''");
+  // Clientes en cuentas y tickets (con sus datos fiscales en el momento de la venta) y puesto del ticket.
+  anadirColumna(db, 'cuentas', 'cliente_id', 'INTEGER REFERENCES clientes(id) ON DELETE SET NULL');
+  anadirColumna(db, 'tickets', 'cliente_id', 'INTEGER');
+  anadirColumna(db, 'tickets', 'cliente', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'tickets', 'puesto_id', 'INTEGER');
+  // Stocks del artículo.
+  anadirColumna(db, 'articulos', 'controlar_stock', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'articulos', 'stock_minimo', 'REAL NOT NULL DEFAULT 0');
+  anadirColumna(db, 'articulos', 'coste', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'articulos', 'codigo_barras', "TEXT NOT NULL DEFAULT ''");
   const unaVez = (nombre: string, fn: () => void) => {
     if (db.prepare('SELECT 1 FROM migraciones WHERE nombre = ?').get(nombre)) return;
     fn();
@@ -323,6 +442,15 @@ function migrar(db: DB) {
     unaVez('permisos_operarios', () => {
       db.prepare('UPDATE operarios SET permisos = ?').run(Object.keys(PERMISOS).join(','));
     });
+    // Los tickets de antes del cobro mixto tienen un único pago.
+    unaVez('ticket_pagos', () => {
+      db.prepare(`INSERT INTO ticket_pagos (ticket_id, forma_cobro_id, importe, entregado, cambio)
+                  SELECT id, forma_cobro_id, total, entregado, cambio FROM tickets WHERE id NOT IN (SELECT ticket_id FROM ticket_pagos)`).run();
+    });
+    // Identificador de esta instalación (para la licencia de módulos).
+    unaVez('instalacion', () => {
+      db.prepare("UPDATE empresa SET instalacion = ? WHERE id = 1 AND instalacion = ''").run(randomBytes(6).toString('hex').toUpperCase().match(/.{4}/g)!.join('-'));
+    });
     // Quien ya entraba en configuración puede ver el cuadre de los cierres ciegos.
     unaVez('permiso_ver_cuadre', () => {
       for (const o of db.prepare('SELECT id, permisos FROM operarios').all() as { id: number; permisos: string }[]) {
@@ -343,6 +471,11 @@ function migrar(db: DB) {
     // La configuración se abre desde el botón de herramientas del menú de arriba: ya no va en la botonera.
     unaVez('configuracion_en_menu', () => {
       db.prepare("DELETE FROM botones WHERE accion = 'configuracion'").run();
+    });
+    unaVez('boton_cliente', () => {
+      if (db.prepare("SELECT 1 FROM botones WHERE accion = 'cliente'").get()) return;
+      const o = (db.prepare('SELECT COALESCE(MAX(orden), 0) + 1 AS o FROM botones').get() as { o: number }).o;
+      db.prepare("INSERT INTO botones (texto, accion, orden, visible) VALUES ('Cliente', 'cliente', ?, 1)").run(o);
     });
     if (cuenta(db, 'ivas') === 0) {
       const i = db.prepare('INSERT INTO ivas (nombre, codigo, porcentaje, recargo, orden) VALUES (?, ?, ?, ?, ?)');
@@ -383,6 +516,7 @@ export const ACCIONES: Record<string, string> = {
   orden_plato: 'Orden de comanda (primeros, segundos...)',
   marchar: 'Marchar cocina',
   comanda: 'Ver comanda por orden de plato',
+  cliente: 'Cliente de la cuenta (datos fiscales en el ticket)',
 };
 
 // Permisos que se pueden dar a cada operario (se aplican en los puestos con permisos activados).

@@ -331,7 +331,11 @@ td small { color: var(--suave); }
   body > *:not(#modal) { display: none !important; }
   .modal { position: static; background: none; padding: 0; }
   .modal-caja { box-shadow: none; }
-  .modal-caja > *:not(.ticket) { display: none !important; }
+  .modal-caja > *:not(.ticket):not(.doc-marco) { display: none !important; }
+  .modal-caja.a4 { max-width: none; overflow: visible; }
+  .doc-marco { background: none !important; padding: 0 !important; max-height: none !important; overflow: visible !important; }
+  .documento { box-shadow: none !important; width: auto !important; min-height: 0 !important; padding: 0 !important; }
+  @page { margin: 15mm; }
 }
 
 /* Configuración */
@@ -371,3 +375,105 @@ td small { color: var(--suave); }
 .ajuste .lado { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .ajuste .lado button { padding: 8px; font-weight: 600; }
 .ajuste .lado button.activo { background: var(--marca); border-color: var(--marca); color: #fff; }
+
+/* Cobro con varios pagos */
+.cobro-cifras { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
+.cobro-cifras .cc { border: 1px solid var(--borde); border-radius: var(--radio); padding: 8px 10px; }
+.cobro-cifras .cc small { display: block; color: var(--suave); font-size: 13px; }
+.cobro-cifras .cc b { font-size: 26px; font-variant-numeric: tabular-nums; }
+.cobro-cifras .cc.pendiente { border-color: var(--ocupada-borde); background: var(--ocupada); }
+.cobro-cifras .cc.pendiente.hecho { border-color: var(--cobrar); background: #e4f4e8; }
+.pagos-lista { grid-column: 1 / -1; display: grid; gap: 4px; }
+.pagos-lista div { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--sel); border-radius: 8px; }
+.pagos-lista div span { flex: 1; font-weight: 600; }
+.pagos-lista div button { padding: 4px 10px; }
+.tenue { color: var(--suave); font-weight: 400; }
+.opciones-cobro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; border-top: 1px solid var(--borde); padding-top: 10px; }
+.opciones-cobro label { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+.opciones-cobro input[type=checkbox] { width: 22px; height: 22px; }
+.opciones-cobro input[type=email] { flex: 1; min-width: 200px; }
+.cliente-cobro { padding: 10px 14px; font-weight: 600; }
+.cliente-cuenta { display: block; color: var(--marca); font-weight: 600; cursor: pointer; }
+
+/* Módulos y pantallas bloqueadas */
+.bloqueo { height: 100%; display: grid; place-items: center; text-align: center; padding: 20px; }
+.bloqueo > div { max-width: 480px; }
+.bloqueo .candado { font-size: 56px; }
+.bloqueo button { padding: 14px 22px; font-size: 16px; font-weight: 700; }
+.baldosas button.bloqueado { opacity: .6; border-left-color: var(--suave); }
+.licencia-cab { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 12px 0; }
+.licencia-cab .inst { font-family: ui-monospace, Consolas, monospace; letter-spacing: 1px; user-select: all; }
+.aviso-licencia { background: var(--ocupada); border: 1px solid var(--ocupada-borde); border-radius: var(--radio); padding: 10px 12px; font-weight: 600; }
+.modulos { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 10px; }
+.modulo { border: 1px solid var(--borde); border-left: 5px solid var(--borde); border-radius: var(--radio); padding: 12px 14px; background: var(--panel); display: flex; flex-direction: column; gap: 4px; }
+.modulo span { color: var(--suave); font-size: 13px; }
+.modulo.activo { border-left-color: var(--cobrar); }
+.modulo.activo span { color: var(--cobrar); font-weight: 700; }
+textarea { font: inherit; padding: 10px; border: 1px solid var(--borde); border-radius: var(--radio); resize: vertical; }
+
+/* Clientes */
+.clientes { padding: 12px 16px; height: 100%; display: flex; flex-direction: column; gap: 10px; }
+.clientes-barra { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.clientes-barra input[type=search] { flex: 1; min-width: 220px; font-size: 17px; padding: 12px 14px; }
+.nuevo-cliente { padding: 14px 22px; font-size: 17px; font-weight: 700; }
+.banda-asignar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--sel); border-radius: var(--radio); padding: 10px 12px; }
+.banda-asignar.tenue { background: none; padding: 0 2px; font-size: 14px; }
+.banda-asignar button { padding: 8px 12px; font-weight: 600; }
+.lista-clientes { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-content: start; }
+.tarjeta-cliente { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--panel); border: 1px solid var(--borde); border-radius: var(--radio); cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; position: relative; overflow: hidden; }
+.tarjeta-cliente:active { background: var(--sel); }
+.tarjeta-cliente.actual { border: 2px solid var(--marca); background: var(--sel); }
+.tarjeta-cliente.pulsando::after { content: ''; position: absolute; left: 0; bottom: 0; height: 4px; background: var(--marca); animation: carga 2s linear forwards; }
+@keyframes carga { from { width: 0; } to { width: 100%; } }
+.avatar { flex: none; width: 46px; height: 46px; border-radius: 50%; background: var(--marca); color: #fff; display: inline-grid; place-items: center; font-style: normal; font-weight: 700; font-size: 17px; }
+.tc-datos { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tc-datos b, .tc-datos small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-datos small { color: var(--suave); }
+.tc-ficha { padding: 8px 12px; font-weight: 600; }
+.form-cliente { grid-template-columns: 1fr 1fr; }
+.form-cliente .ancho { grid-column: 1 / -1; }
+.ficha .cab-config { flex-wrap: wrap; }
+.ficha .cab-config h2 { display: flex; align-items: center; gap: 10px; }
+.cab-acciones { margin-left: auto; display: flex; gap: 8px; }
+.cab-acciones button { padding: 10px 16px; font-weight: 600; }
+.ficha-datos { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.ficha-datos span small { display: block; color: var(--suave); font-size: 12px; }
+.periodo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.periodo button { padding: 8px 14px; }
+.factura-caja { display: flex; flex-direction: row; text-align: left; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; flex-wrap: wrap; }
+.factura-caja button { padding: 12px 18px; font-weight: 700; }
+.ficha-col { padding: 0; height: auto; }
+
+/* Stocks */
+tr.bajo td { background: #fdecea; }
+.chk { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.chk input { width: 20px; height: 20px; }
+.albaran-cab { grid-template-columns: 2fr 1fr 1fr 2fr; }
+input.mini-num { width: 90px; text-align: right; }
+
+/* Documento A4 */
+.modal-caja.a4 { max-width: 920px; }
+.doc-marco { background: #e9edf2; padding: 14px; max-height: 64vh; overflow: auto; }
+.documento { background: #fff; color: #222; width: 794px; max-width: 100%; min-height: 1000px; margin: 0 auto; padding: 48px 52px; box-shadow: 0 2px 10px rgba(0,0,0,.15); font-family: Arial, sans-serif; font-size: 14px; }
+.doc-cab { display: flex; justify-content: space-between; gap: 20px; border-bottom: 3px solid var(--azul); padding-bottom: 14px; }
+.doc-cab .d { text-align: right; }
+.doc-empresa { font-size: 20px; }
+.doc-titulo { font-size: 20px; color: var(--marca); }
+.doc-cliente { margin: 18px 0; padding: 12px 14px; border: 1px solid #ccd; border-radius: 6px; max-width: 360px; }
+.doc-cliente small { display: block; color: #667; text-transform: uppercase; font-size: 11px; letter-spacing: .5px; }
+.doc-lineas { margin-top: 18px; font-size: 14px; }
+.doc-lineas th { background: var(--azul); color: #fff; position: static; }
+.doc-totales { width: auto; margin: 14px 0 0 auto; font-size: 14px; }
+.doc-totales td { border: 0; padding: 4px 10px; }
+.doc-total td { font-size: 20px; font-weight: 700; border-top: 2px solid var(--azul); }
+.doc-nota { color: #667; font-size: 12px; margin-top: 18px; }
+@media (max-width: 700px) {
+  .form-cliente, .albaran-cab { grid-template-columns: 1fr; }
+  .documento { padding: 20px; font-size: 12px; }
+  .cobro-cifras .cc b { font-size: 20px; }
+}
+
+/* Menú de arriba: con Clientes y Stocks no cabe el nombre del local en pantallas medianas. */
+.menu { gap: 2px; }
+.menu button { padding: 8px 12px; }
+@media (max-width: 1500px) { .estado #local { display: none; } .barra-sup { gap: 10px; } }

@@ -10,6 +10,10 @@ import { registrar, describir, leerRegistro } from './registro.ts';
 import { listarImagenes, subirImagen, leerImagen, listaAlergenos } from './imagenes.ts';
 import * as o from './operarios.ts';
 import { PERMISOS } from './db.ts';
+import * as cl from './clientes.ts';
+import * as st from './stocks.ts';
+import * as correo from './correo.ts';
+import { estadoLicencia, activarLicencia, comprobarModulo } from './licencia.ts';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TIPOS: Record<string, string> = {
@@ -52,7 +56,31 @@ ruta('GET', '/api/inicio', async ({ db }) => ({
   aspecto: g.getAspecto(db),
   aspecto_campos: g.ASPECTO,
   acciones: ACCIONES,
+  licencia: estadoLicencia(db),
 }));
+
+// Módulos con licencia.
+ruta('GET', '/api/licencia', ({ db }) => estadoLicencia(db));
+ruta('POST', '/api/licencia', ({ db, body }) => activarLicencia(db, body?.codigo));
+
+// Clientes y facturas completas.
+ruta('GET', '/api/clientes', ({ db, url }) => cl.buscarClientes(db, url.searchParams.get('q')));
+ruta('GET', '/api/clientes/:id/ficha', ({ db, params, url }) => cl.fichaCliente(db, num(params[0]), url.searchParams.get('desde'), url.searchParams.get('hasta')));
+ruta('POST', '/api/clientes/:id/factura', ({ db, params, body }) => cl.crearFactura(db, num(params[0]), body));
+ruta('GET', '/api/facturas/:id', ({ db, params }) => cl.getFactura(db, num(params[0])));
+ruta('POST', '/api/facturas/:id/email', ({ db, params, body }) => correo.enviarDocumento(db, cl.getFactura(db, num(params[0])), 'Factura', body?.para));
+
+// Stocks.
+ruta('GET', '/api/stocks', ({ db, url }) => st.existencias(db, url.searchParams.get('solo') === '1'));
+ruta('GET', '/api/stocks/articulo/:id', ({ db, params }) => st.movimientos(db, num(params[0])));
+ruta('POST', '/api/stocks/ajuste', ({ db, body }) => st.ajustarStock(db, body));
+ruta('GET', '/api/stocks/albaranes', ({ db }) => st.listarAlbaranes(db));
+ruta('GET', '/api/stocks/albaranes/:id', ({ db, params }) => st.getAlbaran(db, num(params[0])));
+ruta('POST', '/api/stocks/albaranes', ({ db, body }) => st.crearAlbaran(db, body));
+
+// Correo.
+ruta('POST', '/api/tickets/:id/email', ({ db, params, body }) => correo.enviarDocumento(db, v.getTicket(db, num(params[0])), 'Factura simplificada', body?.para));
+ruta('POST', '/api/correo/prueba', ({ db, body }) => correo.enviarPrueba(db, body?.para));
 
 ruta('GET', '/api/cuentas', ({ db }) => v.cuentasAbiertas(db));
 ruta('POST', '/api/cuentas', ({ db, body }) => v.abrirCuenta(db, body));
@@ -75,7 +103,15 @@ ruta('GET', '/api/tickets/:id', ({ db, params }) => v.getTicket(db, num(params[0
 ruta('POST', '/api/tickets/:id/anular', ({ db, params }) => v.anularTicket(db, num(params[0])));
 
 ruta('GET', '/api/caja', ({ db }) => v.resumenCaja(db));
-ruta('POST', '/api/caja/cierre', ({ db, body }) => v.cerrarCaja(db, body));
+ruta('POST', '/api/caja/cierre', async ({ db, body }) => {
+  const c: any = v.cerrarCaja(db, body);
+  // El resumen por correo no puede impedir el cierre: si falla, queda en el registro.
+  try { c.correo = await correo.enviarCierre(db, c.id); } catch (e: any) {
+    c.correo_error = e.message;
+    registrar(db, { nivel: 'aviso', accion: `No se pudo enviar el cierre por correo: ${e.message}`, origen: 'servidor' });
+  }
+  return c;
+});
 ruta('GET', '/api/informes/cierres', ({ db }) => v.listarCierres(db));
 ruta('GET', '/api/informes/cierres/:id', ({ db, params }) => v.verCierre(db, num(params[0])));
 
@@ -170,6 +206,7 @@ export function crearServidor(db: DB) {
           if (!m) continue;
           body = r.metodo === 'GET' ? {} : await leerCuerpo(req);
           o.comprobarPermiso(db, idCab('x-puesto'), operario, r.metodo, url.pathname);
+          comprobarModulo(db, r.metodo, url.pathname, body);
           v.contexto.operario = quien;
           v.contexto.permisos = operario?.permisos ?? [];
           v.contexto.puesto = idCab('x-puesto');

@@ -3,3 +3,5 @@ datos/
 *.db
 *.db-*
 imagenes/
+*.pem
+licencias/

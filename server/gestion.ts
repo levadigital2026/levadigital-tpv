@@ -18,6 +18,17 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     nombre: { tipo: 'texto', obligatorio: true }, precio: { tipo: 'entero' }, iva: { tipo: 'decimal' },
     familia_id: { tipo: 'ref' }, grupo_cocina: { tipo: 'entero' }, orden_plato_id: { tipo: 'ref' }, orden: { tipo: 'entero' }, activo: { tipo: 'bool' },
     imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' }, alergenos: { tipo: 'alergenos' },
+    controlar_stock: { tipo: 'bool' }, stock_minimo: { tipo: 'decimal' }, coste: { tipo: 'entero' }, codigo_barras: { tipo: 'texto' },
+  },
+  clientes: {
+    nombre: { tipo: 'texto', obligatorio: true }, apellidos: { tipo: 'texto' }, apodo: { tipo: 'texto' }, nif: { tipo: 'texto' },
+    tipo_nif: { tipo: 'texto', valores: ['nif', 'nie', 'pasaporte', 'extranjero'] }, pais: { tipo: 'texto' }, domicilio: { tipo: 'texto' },
+    localidad: { tipo: 'texto' }, cp: { tipo: 'texto' }, provincia: { tipo: 'texto' }, telefono: { tipo: 'texto' }, telefono2: { tipo: 'texto' },
+    email: { tipo: 'texto' }, observaciones: { tipo: 'texto' }, descuento: { tipo: 'decimal' }, tarjeta: { tipo: 'texto' },
+  },
+  proveedores: {
+    nombre: { tipo: 'texto', obligatorio: true }, nif: { tipo: 'texto' }, telefono: { tipo: 'texto' }, email: { tipo: 'texto' },
+    direccion: { tipo: 'texto' }, contacto: { tipo: 'texto' }, observaciones: { tipo: 'texto' },
   },
   zonas: { nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['barra', 'mesas'] }, orden: { tipo: 'entero' } },
   mesas: { zona_id: { tipo: 'ref', obligatorio: true }, nombre: { tipo: 'texto', obligatorio: true }, x: { tipo: 'entero' }, y: { tipo: 'entero' } },
@@ -38,6 +49,10 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['tpv', 'pda', 'kds'] },
     impresora_tickets_id: { tipo: 'ref' }, orden: { tipo: 'entero' },
     usar_permisos: { tipo: 'bool' }, pedir_operario: { tipo: 'bool' },
+    serie_tickets: { tipo: 'texto' }, serie_facturas: { tipo: 'texto' },
+    mail_en_cierre: { tipo: 'bool' }, email_cierre: { tipo: 'texto' }, smtp_servidor: { tipo: 'texto' }, smtp_puerto: { tipo: 'entero' },
+    smtp_cifrado: { tipo: 'texto', valores: ['ninguno', 'tls', 'ssl'] }, smtp_usuario: { tipo: 'texto' }, smtp_clave: { tipo: 'texto' },
+    email_emisor: { tipo: 'texto' }, email_asunto: { tipo: 'texto' }, email_encabezado: { tipo: 'texto' }, email_pie: { tipo: 'texto' },
     cierre_ciego: { tipo: 'bool' }, imprimir_cierre: { tipo: 'bool' }, cierre_secciones: { tipo: 'lista', valores: Object.keys(SECCIONES_CIERRE) },
   },
   impresoras: {
@@ -128,10 +143,14 @@ function comprobarTabla(tabla: string) {
   if (!TABLAS[tabla]) throw new ErrorTPV('Tabla desconocida', 404);
 }
 
+export const CLAVE_OCULTA = '••••••';
 export function listar(db: DB, tabla: string) {
   comprobarTabla(tabla);
-  const orden = 'orden' in TABLAS[tabla] ? 'orden, id' : 'id';
-  return db.prepare(`SELECT * FROM ${tabla} ORDER BY ${orden}`).all();
+  const orden = 'orden' in TABLAS[tabla] ? 'orden, id' : tabla === 'clientes' || tabla === 'proveedores' ? 'nombre COLLATE NOCASE' : 'id';
+  const filas = db.prepare(`SELECT * FROM ${tabla} ORDER BY ${orden}`).all() as Record<string, any>[];
+  // La contraseña del correo no sale nunca del servidor.
+  if (tabla === 'puestos') for (const f of filas) f.smtp_clave = f.smtp_clave ? CLAVE_OCULTA : '';
+  return filas;
 }
 
 // Una pulsera RFID solo puede ser de un operario.
@@ -148,7 +167,9 @@ export function crear(db: DB, tabla: string, datos: Record<string, unknown>) {
   const cols = Object.keys(v);
   const r = db.prepare(`INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
     .run(...Object.values(v));
-  return db.prepare(`SELECT * FROM ${tabla} WHERE id = ?`).get(Number(r.lastInsertRowid));
+  const fila = db.prepare(`SELECT * FROM ${tabla} WHERE id = ?`).get(Number(r.lastInsertRowid)) as Record<string, any>;
+  if (tabla === 'puestos') fila.smtp_clave = fila.smtp_clave ? CLAVE_OCULTA : '';
+  return fila;
 }
 
 // Una familia no puede ser subfamilia de sí misma ni de una de sus subfamilias.
@@ -163,6 +184,7 @@ function evitarCiclo(db: DB, id: number, padreId: number) {
 export function actualizar(db: DB, tabla: string, id: number, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, false);
+  if (tabla === 'puestos' && v.smtp_clave === CLAVE_OCULTA) delete v.smtp_clave;
   rfidLibre(db, tabla, v, id);
   if (tabla === 'familias' && v.padre_id != null) evitarCiclo(db, id, Number(v.padre_id));
   const cols = Object.keys(v);
@@ -170,8 +192,9 @@ export function actualizar(db: DB, tabla: string, id: number, datos: Record<stri
     const r = db.prepare(`UPDATE ${tabla} SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE id = ?`).run(...Object.values(v), id);
     if (r.changes === 0) throw new ErrorTPV('No existe', 404);
   }
-  const fila = db.prepare(`SELECT * FROM ${tabla} WHERE id = ?`).get(id);
+  const fila = db.prepare(`SELECT * FROM ${tabla} WHERE id = ?`).get(id) as Record<string, any> | undefined;
   if (!fila) throw new ErrorTPV('No existe', 404);
+  if (tabla === 'puestos') fila.smtp_clave = fila.smtp_clave ? CLAVE_OCULTA : '';
   return fila;
 }
 
@@ -286,11 +309,12 @@ export function setAspecto(db: DB, datos: Record<string, unknown>) {
 }
 
 export function getEmpresa(db: DB) {
-  return db.prepare('SELECT * FROM empresa WHERE id = 1').get();
+  const { licencia, ...e } = db.prepare('SELECT * FROM empresa WHERE id = 1').get() as Record<string, any>;
+  return e;
 }
 
 export function setEmpresa(db: DB, datos: Record<string, unknown>) {
-  for (const k of ['nombre', 'nif', 'direccion', 'serie_tickets']) {
+  for (const k of ['nombre', 'nif', 'direccion', 'localidad', 'telefono', 'email', 'serie_tickets', 'serie_facturas']) {
     if (k in datos) db.prepare(`UPDATE empresa SET ${k} = ? WHERE id = 1`).run(String(datos[k] ?? '').trim());
   }
   return getEmpresa(db);

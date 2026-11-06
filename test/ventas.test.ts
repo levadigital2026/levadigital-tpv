@@ -4,9 +4,20 @@ import type { AddressInfo } from 'node:net';
 import { openDb } from '../server/db.ts';
 import { crearServidor } from '../server/app.ts';
 import { calcularHuella, desgloseIva } from '../server/ventas.ts';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { usarClavePublica, activarLicencia, MODULOS } from '../server/licencia.ts';
 
-async function arrancar() {
+// Licencia de pruebas: clave propia de los tests y todos los módulos (salvo que se pida otra cosa).
+const parClaves = generateKeyPairSync('ed25519');
+usarClavePublica(parClaves.publicKey.export({ type: 'spki', format: 'pem' }) as string);
+export function licenciaPrueba(instalacion: string, modulos = Object.keys(MODULOS), caduca?: string) {
+  const datos = Buffer.from(JSON.stringify({ i: instalacion, m: modulos, ...(caduca ? { c: caduca } : {}) })).toString('base64url');
+  return `LEVA1.${datos}.${sign(null, Buffer.from(datos), parClaves.privateKey).toString('base64url')}`;
+}
+
+async function arrancar(conModulos = true) {
   const db = openDb(':memory:');
+  if (conModulos) activarLicencia(db, licenciaPrueba((db.prepare('SELECT instalacion FROM empresa').get() as any).instalacion));
   const srv = crearServidor(db);
   await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/api`;
@@ -483,4 +494,189 @@ test('carta de demostración: sustituye familias y artículos', async () => {
     assert.ok(nuevo.comentarios.some((x: any) => x.familia_id === cafes.id && x.texto === 'Con hielo'));
     assert.equal((db.prepare('SELECT COUNT(*) AS n FROM tickets').get() as any).n, 1);
   } finally { await cerrar(); }
+});
+
+test('cobro mixto: 6 € en efectivo y el resto con tarjeta; lo que falta no deja cerrar', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const ef = ini.formas_cobro.find((f: any) => f.tipo === 'efectivo'), tj = ini.formas_cobro.find((f: any) => f.tipo === 'tarjeta');
+    const rabas = ini.articulos.find((a: any) => a.nombre === 'Rabas'); // 12,00 €
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: rabas.id });
+    let r = await api('POST', `/cuentas/${c.id}/cobrar`, { pagos: [{ forma_cobro_id: ef.id, importe: 600 }] });
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /Faltan 6,00/);
+    r = await api('POST', `/cuentas/${c.id}/cobrar`, { pagos: [{ forma_cobro_id: tj.id, importe: 600 }, { forma_cobro_id: tj.id, importe: 700 }] });
+    assert.match(r.data.error, /no se puede cobrar más/);
+    // 6 € con tarjeta y le dan 10 € en efectivo para el resto: 4 € de cambio.
+    const t = (await api('POST', `/cuentas/${c.id}/cobrar`, { pagos: [{ forma_cobro_id: tj.id, importe: 600 }, { forma_cobro_id: ef.id, importe: 1000 }] })).data;
+    assert.equal(t.total, 1200);
+    assert.equal(t.cambio, 400);
+    assert.equal(t.pagos.length, 2);
+    assert.equal(t.forma_cobro, 'Tarjeta + Efectivo');
+    const caja = (await api('GET', '/caja')).data;
+    assert.equal(caja.por_forma.find((f: any) => f.id === ef.id).total, 600);
+    assert.equal(caja.por_forma.find((f: any) => f.id === tj.id).total, 600);
+    // La anulación devuelve cada pago a su forma.
+    await api('POST', `/tickets/${t.id}/anular`);
+    const caja2 = (await api('GET', '/caja')).data;
+    assert.equal(caja2.por_forma.find((f: any) => f.id === ef.id).total, 0);
+    assert.equal((await api('GET', '/tickets')).data.find((x: any) => x.id === t.id).forma_cobro, 'Mixto');
+  } finally { await cerrar(); }
+});
+
+test('series por puesto: dos negocios con el mismo NIF no repiten número', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const p1 = ini.puestos[0];
+    const p2 = (await api('POST', '/gestion/puestos', { nombre: 'Restaurante', serie_tickets: 'R' })).data;
+    await api('PUT', `/gestion/puestos/${p1.id}`, { serie_tickets: 'B' });
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const vender = async (puesto: number) => {
+      const h = { 'x-puesto': String(puesto) };
+      const c = (await api('POST', '/cuentas', { zona_id: barra.id }, h)).data;
+      await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[0].id }, h);
+      return (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: ini.formas_cobro[0].id }, h)).data;
+    };
+    const a = await vender(p1.id), b = await vender(p2.id), c = await vender(p1.id);
+    assert.deepEqual([a.serie, a.numero], ['B', 1]);
+    assert.deepEqual([b.serie, b.numero], ['R', 1]);
+    assert.deepEqual([c.serie, c.numero], ['B', 2]);
+    assert.equal(c.puesto_id, p1.id);
+  } finally { await cerrar(); }
+});
+
+test('módulos: sin licencia no hay clientes ni stocks; la licencia va ligada a la instalación', async () => {
+  const { api, db, cerrar } = await arrancar(false);
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    assert.deepEqual(ini.licencia.activos, []);
+    assert.equal((await api('GET', '/clientes')).status, 402);
+    assert.equal((await api('GET', '/stocks')).status, 402);
+    assert.equal((await api('POST', '/licencia', { codigo: licenciaPrueba('OTRA-INST-0000', ['clientes']) })).status, 400);
+    assert.equal((await api('POST', '/licencia', { codigo: 'LEVA1.xx.yy' })).status, 400);
+    const r = (await api('POST', '/licencia', { codigo: licenciaPrueba(ini.licencia.instalacion, ['clientes']) })).data;
+    assert.deepEqual(r.activos, ['clientes']);
+    assert.equal((await api('GET', '/clientes')).status, 200);
+    assert.equal((await api('GET', '/stocks')).status, 402);
+    // Caducada: deja de valer.
+    db.prepare('UPDATE empresa SET licencia = ?').run(licenciaPrueba(ini.licencia.instalacion, ['clientes'], '2020-01-01'));
+    assert.equal((await api('GET', '/clientes')).status, 402);
+  } finally { await cerrar(); }
+});
+
+test('clientes: asignar a la cuenta, ficha con ventas y factura completa de un periodo', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const cli = (await api('POST', '/gestion/clientes', { nombre: 'Talleres Bidasoa SL', nif: 'B20123456', domicilio: 'Calle Mayor 1', localidad: 'Irun', email: 'admin@talleres.example' })).data;
+    assert.equal((await api('GET', '/clientes?q=bidasoa')).data[0].id, cli.id);
+    const vender = async (art: any, uds: number) => {
+      const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+      await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: art.id, unidades: uds });
+      const cu = (await api('PATCH', `/cuentas/${c.id}`, { cliente_id: cli.id })).data;
+      assert.equal(cu.cliente.nif, 'B20123456');
+      return (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: ini.formas_cobro[1].id })).data;
+    };
+    const t1 = await vender(ini.articulos[0], 2);
+    const t2 = await vender(ini.articulos[1], 1);
+    const t3 = await vender(ini.articulos[2], 1);
+    assert.equal(t1.cliente.nombre, 'Talleres Bidasoa SL');
+    await api('POST', `/tickets/${t3.id}/anular`);
+    let ficha = (await api('GET', `/clientes/${cli.id}/ficha`)).data;
+    assert.equal(ficha.estadisticas.visitas, 3);
+    assert.equal(ficha.estadisticas.gastado, t1.total + t2.total);
+    assert.equal(ficha.sin_facturar.tickets, 2);
+    const f = (await api('POST', `/clientes/${cli.id}/factura`, {})).data;
+    assert.equal(f.total, t1.total + t2.total);
+    assert.equal(f.tickets.length, 2);
+    assert.equal(f.cliente.nif, 'B20123456');
+    assert.equal(f.serie, 'F');
+    ficha = (await api('GET', `/clientes/${cli.id}/ficha`)).data;
+    assert.equal(ficha.sin_facturar.tickets, 0);
+    assert.equal((await api('POST', `/clientes/${cli.id}/factura`, {})).status, 400);
+    // Un ticket ya facturado no se puede anular.
+    assert.equal((await api('POST', `/tickets/${t1.id}/anular`)).status, 400);
+    // Sin NIF no hay factura completa.
+    const sinNif = (await api('POST', '/gestion/clientes', { nombre: 'Ane' })).data;
+    assert.match((await api('POST', `/clientes/${sinNif.id}/factura`, {})).data.error, /NIF/);
+  } finally { await cerrar(); }
+});
+
+test('stocks: albarán de compra suma, la venta resta, la anulación devuelve y el ajuste deja lo contado', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const cana = ini.articulos.find((a: any) => a.nombre === 'Caña');
+    const prov = (await api('POST', '/gestion/proveedores', { nombre: 'Distribuciones Txingudi' })).data;
+    assert.equal((await api('POST', '/stocks/albaranes', { proveedor_id: prov.id, lineas: [] })).status, 400);
+    const alb = (await api('POST', '/stocks/albaranes', { proveedor_id: prov.id, numero: 'A-77', fecha: '2026-11-06', lineas: [{ articulo_id: cana.id, cantidad: 50, coste: 60 }] })).data;
+    assert.equal(alb.total, 3000);
+    const stock = async () => (await api('GET', '/stocks')).data.find((a: any) => a.id === cana.id);
+    assert.equal((await stock()).stock, 50);
+    assert.equal((await stock()).coste, 60);
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: cana.id, unidades: 3 });
+    const t = (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: ini.formas_cobro[0].id })).data;
+    assert.equal((await stock()).stock, 47);
+    await api('POST', `/tickets/${t.id}/anular`);
+    assert.equal((await stock()).stock, 50);
+    const aj = (await api('POST', '/stocks/ajuste', { articulo_id: cana.id, stock: 44 })).data;
+    assert.equal(aj.diferencia, -6);
+    assert.equal((await stock()).stock, 44);
+    assert.equal((await api('GET', `/stocks/articulo/${cana.id}`)).data.length, 4);
+  } finally { await cerrar(); }
+});
+
+test('correo: envía el ticket por SMTP con la configuración del puesto (servidor de pruebas)', async () => {
+  const { createServer } = await import('node:net');
+  const recibido: string[] = [];
+  const smtp = createServer(s => {
+    let datos = false, buf = '';
+    s.write('220 prueba\r\n');
+    s.on('data', d => {
+      buf += d.toString();
+      let i;
+      while ((i = buf.indexOf('\r\n')) >= 0) {
+        const l = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (datos) { if (l === '.') { datos = false; s.write('250 ok\r\n'); } else recibido.push(l); continue; }
+        if (l.startsWith('EHLO')) s.write('250-prueba\r\n250 AUTH LOGIN\r\n');
+        else if (l === 'AUTH LOGIN') s.write('334 VXNlcm5hbWU6\r\n');
+        else if (l === Buffer.from('tpv@bar.example').toString('base64')) s.write('334 UGFzc3dvcmQ6\r\n');
+        else if (l === Buffer.from('secreta').toString('base64')) s.write('235 ok\r\n');
+        else if (l === 'DATA') { datos = true; s.write('354 adelante\r\n'); }
+        else if (l === 'QUIT') { s.write('221 adios\r\n'); s.end(); }
+        else s.write('250 ok\r\n');
+      }
+    });
+  });
+  await new Promise<void>(r => smtp.listen(0, '127.0.0.1', r));
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const puesto = ini.puestos[0];
+    const h = { 'x-puesto': String(puesto.id) };
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id }, h)).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[0].id }, h);
+    const t = (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: ini.formas_cobro[0].id }, h)).data;
+    assert.match((await api('POST', `/tickets/${t.id}/email`, { para: 'cliente@example.com' }, h)).data.error, /configurar el correo/);
+    const p = (await api('PUT', `/gestion/puestos/${puesto.id}`, { smtp_servidor: '127.0.0.1', smtp_puerto: (smtp.address() as AddressInfo).port, smtp_cifrado: 'ninguno',
+      smtp_usuario: 'tpv@bar.example', smtp_clave: 'secreta', email_emisor: 'tpv@bar.example', email_pie: 'Gracias' })).data;
+    // La contraseña no vuelve nunca al navegador, y guardar sin cambiarla la conserva.
+    assert.equal(p.smtp_clave, '••••••');
+    await api('PUT', `/gestion/puestos/${puesto.id}`, { smtp_clave: '••••••', nombre: 'TPV barra' });
+    assert.equal((await api('POST', `/tickets/${t.id}/email`, { para: 'no-es-correo' }, h)).status, 400);
+    const r = (await api('POST', `/tickets/${t.id}/email`, { para: 'cliente@example.com' }, h)).data;
+    assert.deepEqual(r, { enviado: true, para: ['cliente@example.com'] });
+    const cuerpo = Buffer.from(recibido.slice(recibido.indexOf('') + 1).join(''), 'base64').toString('utf8');
+    assert.ok(recibido.some(l => l === 'To: cliente@example.com'));
+    assert.match(cuerpo, /Factura simplificada/);
+    assert.match(cuerpo, /Gracias/);
+  } finally { await cerrar(); smtp.close(); }
 });

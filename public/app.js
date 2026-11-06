@@ -43,7 +43,7 @@ function abrirModal(html) {
 }
 function cerrarModal() {
   $('#modal').classList.add('oculto');
-  $('#modal-caja').classList.remove('ancho');
+  $('#modal-caja').classList.remove('ancho', 'a4');
   if (E.pedirTrasModal) { E.pedirTrasModal = false; setTimeout(mostrarPanelOperarios, 0); }
   $('#modal-caja').innerHTML = '';
 }
@@ -165,9 +165,9 @@ function nombreCuenta(c) {
 }
 
 // ---------- Navegación ----------
-const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados, cierres: pintarCierres };
+const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados, cierres: pintarCierres, clientes: () => pintarClientes(), stocks: () => pintarStocks(), modulos: pintarModulos };
 // Pantallas que cuelgan de Configuración (el botón de herramientas del menú queda marcado).
-const VISTAS_CONFIG = new Set(['config', 'gestion', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres']);
+const VISTAS_CONFIG = new Set(['config', 'gestion', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres', 'modulos']);
 function ir(vista) {
   E.vista = vista;
   const marcada = VISTAS_CONFIG.has(vista) ? 'config' : vista;
@@ -181,6 +181,9 @@ $('#menu').addEventListener('click', e => {
     if (!tienePermiso('configuracion')) return aviso('Tu operario no tiene permiso para entrar en configuración', true);
     E.seccionConfig = null;
   }
+  E.volverA = null;
+  if (b.dataset.vista === 'clientes') { E.eligiendoCliente = false; E.fichaCliente = null; E.volverCobro = false; }
+  if (b.dataset.vista === 'stocks') E.tabStocks = E.tabStocks === 'nuevo_albaran' ? 'nuevo_albaran' : 'existencias';
   intentar(() => ir(b.dataset.vista));
 });
 
@@ -202,7 +205,8 @@ async function pintarVenta() {
   <div class="venta ${E.verTeclado ? 'ver-teclado' : ''}">
     <section class="panel cuenta">
       <div class="cuenta-cab">
-        <div><b>${esc(nombreCuenta(c))}</b><small>${c ? `${c.comensales ? c.comensales + ' comensales · ' : ''}abierta ${hora(c.abierta_en)}` : 'Toca un artículo para empezar'}</small></div>
+        <div><b>${esc(nombreCuenta(c))}</b><small>${c ? `${c.comensales ? c.comensales + ' comensales · ' : ''}abierta ${hora(c.abierta_en)}` : 'Toca un artículo para empezar'}</small>
+          ${c?.cliente ? `<small class="cliente-cuenta" data-accion="cliente">👤 ${esc(c.cliente.nombre)}${c.cliente.nif ? ' · ' + esc(c.cliente.nif) : ''}</small>` : ''}</div>
         <button id="b-teclado" title="Mostrar u ocultar la calculadora" class="${E.verTeclado ? 'activo' : ''}">123</button>
       </div>
       <div class="lineas">
@@ -278,7 +282,7 @@ function accionActiva(accion, c) {
   const conLineas = !!c?.lineas?.length;
   switch (accion) {
     case 'guardar': case 'comensales': case 'nombre': return !!c;
-    case 'borrar_todo': case 'marchar': return !!c;
+    case 'borrar_todo': case 'marchar': case 'cliente': return !!c;
     case 'orden_plato': case 'comanda': return conLineas;
     case 'preticket': case 'efectivo_exacto': case 'tarjeta': return conLineas;
     case 'borrar_linea': case 'detalle': return conLineas && !!E.lineaSel;
@@ -298,8 +302,7 @@ async function cobroRapido(tipo) {
   const ticket = await api('POST', `/cuentas/${E.cuenta.id}/cobrar`, { forma_cobro_id: fc.id });
   E.cuenta = null;
   E.lineaSel = null;
-  verTicket(ticket);
-  trasOperacion();
+  await trasCobro(ticket, opcionesCobro());
   return pintarVenta();
 }
 
@@ -314,6 +317,7 @@ async function accion(a) {
       if (!tienePermiso('configuracion')) return aviso('Tu operario no tiene permiso para entrar en configuración', true);
       return ir('config');
     case 'orden_plato': return elegirOrdenPlato();
+    case 'cliente': return elegirClienteCuenta();
     case 'marchar': return marcharCocina();
     case 'comanda': return verComanda();
     case 'borrar_linea': return borrarLinea(E.lineaSel);
@@ -579,83 +583,148 @@ $('#vista').addEventListener('click', e => intentar(async () => {
 }));
 
 // ---------- Cobro ----------
+// Cobro con varios pagos: se van añadiendo importes en distintas formas de pago hasta cubrir el total.
+// Solo el efectivo puede pasar de lo que falta (da cambio).
+const leerOpcionesCobro = () => { try { return JSON.parse(localStorage.getItem('opcionesCobro') || '{}'); } catch { return {}; } };
+function opcionesCobro() {
+  const o = leerOpcionesCobro();
+  return { noImprimir: !!o.noImprimir, a4: !!o.a4, email: false };
+}
 function abrirCobro() {
   const c = E.cuenta;
-  let entregado = '';
+  let entrada = '';
+  const pagos = [];
+  const guardadas = leerOpcionesCobro();
+  const op = { noImprimir: !!guardadas.noImprimir, a4: !!guardadas.a4, email: !!guardadas.email && !!c.cliente?.email, para: c.cliente?.email || '' };
   const formas = E.datos.formas_cobro.filter(f => f.activa);
+  const cent = () => entrada ? Math.round(Number(entrada.replace(',', '.')) * 100) : 0;
+  const cobradoHasta = () => { let falta = c.total; for (const p of pagos) falta -= Math.min(p.importe, Math.max(falta, 0)); return c.total - Math.max(falta, 0); };
+  const pendiente = () => c.total - cobradoHasta();
+  const cambio = () => pagos.reduce((n, p) => n + p.importe, 0) - c.total;
   const pintar = () => {
-    const ent = entregado ? Math.round(Number(entregado.replace(',', '.')) * 100) : 0;
+    const pend = pendiente();
     abrirModal(`
       <h2><span>Cobrar ${esc(nombreCuenta(c))}</span><button data-m="cerrar">✕</button></h2>
       <div class="cobro">
-        <div>
-          <div>Total</div><div class="grande">${euros(c.total)}</div>
-          <div style="margin-top:10px">Entregado</div><div class="grande">${ent ? euros(ent) : '—'}</div>
-          <div style="margin-top:10px">Cambio</div><div class="grande" style="color:var(--cobrar)">${ent >= c.total ? euros(ent - c.total) : '—'}</div>
+        <div class="cobro-cifras">
+          <div class="cc"><small>Total</small><b>${euros(c.total)}</b></div>
+          <div class="cc"><small>Cobrado</small><b>${euros(cobradoHasta())}</b></div>
+          <div class="cc pendiente ${pend ? '' : 'hecho'}"><small>${pend ? 'Falta por cobrar' : 'Cambio'}</small><b>${pend ? euros(pend) : euros(Math.max(cambio(), 0))}</b></div>
+          <div class="cc"><small>Importe a añadir</small><b>${entrada ? euros(cent()) : '<span class="tenue">' + euros(pend) + '</span>'}</b></div>
+          <div class="pagos-lista">${pagos.length ? pagos.map((p, i) => `<div><span>${esc(p.nombre)}</span><b>${euros(p.importe)}</b><button data-quitar="${i}" title="Quitar este pago">✕</button></div>`).join('')
+            : '<small class="tenue">Teclea un importe y toca la forma de pago. Sin importe se cobra lo que falta.</small>'}</div>
         </div>
         <div>
           <div class="billetes">${[5, 10, 20, 50].map(b => `<button data-billete="${b}">${b} €</button>`).join('')}</div>
           <div class="teclado" style="margin-top:6px">
-            ${['7', '8', '9', 'C', '4', '5', '6', '', '1', '2', '3', '', '0', ',', '', ''].map(k => k ? `<button data-ct="${k}">${k}</button>` : '<span></span>').join('')}
+            ${['7', '8', '9', 'C', '4', '5', '6', '⌫', '1', '2', '3', '', '0', ',', '00', ''].map(k => k ? `<button data-ct="${k}">${k}</button>` : '<span></span>').join('')}
           </div>
         </div>
         <div class="formas" style="grid-column:1/-1">
           ${formas.map(f => `<button data-forma="${f.id}" class="${f.tipo === 'efectivo' ? 'efectivo' : ''}">${esc(f.nombre)}</button>`).join('')}
         </div>
+        <div class="opciones-cobro" style="grid-column:1/-1">
+          ${moduloActivo('clientes') ? `<button data-m="cliente" class="cliente-cobro">👤 ${c.cliente ? esc(c.cliente.nombre) + (c.cliente.nif ? ' · ' + esc(c.cliente.nif) : '') : 'Asignar cliente'}</button>` : ''}
+          <label><input type="checkbox" data-op="noImprimir" ${op.noImprimir ? 'checked' : ''}> No imprimir</label>
+          <label><input type="checkbox" data-op="a4" ${op.a4 ? 'checked' : ''}> Imprimir en A4</label>
+          <label><input type="checkbox" data-op="email" ${op.email ? 'checked' : ''}> Enviar por email</label>
+          <input type="email" data-para placeholder="correo@cliente.es" value="${esc(op.para)}" class="${op.email ? '' : 'oculto'}">
+        </div>
       </div>`);
   };
+  const guardarOp = () => { try { localStorage.setItem('opcionesCobro', JSON.stringify({ noImprimir: op.noImprimir, a4: op.a4, email: op.email })); } catch { } };
+  const terminar = async () => {
+    if (op.email && !op.para.trim()) { pagos.pop(); pintar(); return aviso('Escribe el correo al que se envía el ticket', true); }
+    try {
+      const ticket = await api('POST', `/cuentas/${c.id}/cobrar`, { pagos: pagos.map(p => ({ forma_cobro_id: p.forma_cobro_id, importe: p.importe })) });
+      E.cuenta = null;
+      E.lineaSel = null;
+      await trasCobro(ticket, op);
+      return pintarVenta();
+    } catch (e) { pagos.pop(); pintar(); throw e; }
+  };
   pintar();
+  $('#modal-caja').onchange = e => {
+    const k = e.target.dataset.op;
+    if (k) { op[k] = e.target.checked; guardarOp(); if (k === 'email') $('[data-para]').classList.toggle('oculto', !op.email); }
+  };
+  $('#modal-caja').oninput = e => { if (e.target.matches('[data-para]')) op.para = e.target.value; };
   $('#modal-caja').onclick = e => intentar(async () => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.m === 'cerrar') return cerrarModal();
-    if (b.dataset.billete) { entregado = b.dataset.billete; return pintar(); }
+    if (b.dataset.m === 'cliente') { cerrarModal(); E.volverCobro = true; return elegirClienteCuenta(); }
+    if (b.dataset.quitar !== undefined) { pagos.splice(Number(b.dataset.quitar), 1); return pintar(); }
+    if (b.dataset.billete) { entrada = b.dataset.billete; return pintar(); }
     if (b.dataset.ct) {
       const k = b.dataset.ct;
-      if (k === 'C') entregado = '';
-      else if (k === ',') { if (!entregado.includes(',')) entregado = (entregado || '0') + ','; }
-      else if (entregado.length < 8) entregado += k;
+      if (k === 'C') entrada = '';
+      else if (k === '⌫') entrada = entrada.slice(0, -1);
+      else if (k === ',') { if (!entrada.includes(',')) entrada = (entrada || '0') + ','; }
+      else if (entrada.length < 8 && !/,\d\d$/.test(entrada)) entrada += k;
       return pintar();
     }
     if (b.dataset.forma) {
-      const ent = entregado ? Math.round(Number(entregado.replace(',', '.')) * 100) : undefined;
-      const ticket = await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: Number(b.dataset.forma), entregado: ent });
-      E.cuenta = null;
-      E.lineaSel = null;
-      verTicket(ticket);
-      trasOperacion();
-      return pintarVenta();
+      const f = formas.find(x => x.id === Number(b.dataset.forma));
+      const pend = pendiente();
+      if (pend <= 0) return terminar();
+      const importe = entrada ? cent() : pend;
+      if (!(importe > 0)) return aviso('Importe no válido', true);
+      if (importe > pend && f.tipo !== 'efectivo') return aviso(`Con ${f.nombre} no se puede cobrar más de lo que falta (${euros(pend)})`, true);
+      pagos.push({ forma_cobro_id: f.id, nombre: f.nombre, tipo: f.tipo, importe });
+      entrada = '';
+      if (pendiente() <= 0) return terminar();
+      return pintar();
     }
   });
 }
 
+// Qué pasa al terminar de cobrar: ticket en pantalla, A4, sin imprimir y/o por correo.
+async function trasCobro(ticket, op = {}) {
+  if (op.email && op.para) {
+    api('POST', `/tickets/${ticket.id}/email`, { para: op.para.trim() })
+      .then(() => aviso(`Ticket enviado a ${op.para.trim()}`)).catch(e => aviso('No se pudo enviar el correo: ' + e.message, true));
+  }
+  const cambio = ticket.cambio ? ` · Cambio ${euros(ticket.cambio)}` : '';
+  if (op.noImprimir) aviso(`Cobrado ${ticket.serie}-${ticket.numero}${cambio}`);
+  else if (op.a4) verDocumentoA4(ticket, 'Factura simplificada', `/tickets/${ticket.id}/email`);
+  else verTicket(ticket);
+  trasOperacion();
+}
+
 // ---------- Tickets ----------
 function htmlTicket(t, titulo) {
-  const e = t.empresa;
+  const e = t.empresa, cl = t.cliente;
+  const pagos = t.pagos?.length > 1 ? t.pagos : null;
   return `<div class="ticket">
-    <div class="c"><b>${esc(e.nombre)}</b><br>${esc(e.direccion)}${e.nif ? '<br>NIF ' + esc(e.nif) : ''}</div><hr>
+    <div class="c"><b>${esc(e.nombre)}</b><br>${esc(e.direccion)}${e.localidad ? '<br>' + esc(e.localidad) : ''}${e.nif ? '<br>NIF ' + esc(e.nif) : ''}</div><hr>
     <div class="c">${esc(titulo)}</div>
     <div>${esc(t.serie)}-${t.numero} · ${hora(t.emitido_en)}</div>
-    ${t.mesa_nombre ? `<div>${esc(t.zona_nombre)} · ${esc(t.mesa_nombre)}</div>` : ''}<hr>
+    ${t.mesa_nombre ? `<div>${esc(t.zona_nombre)} · ${esc(t.mesa_nombre)}</div>` : ''}
+    ${cl ? `<hr><div>Cliente: ${esc(cl.nombre)}</div>${cl.nif ? `<div>NIF: ${esc(cl.nif)}</div>` : ''}${cl.domicilio ? `<div>${esc(cl.domicilio)}</div>` : ''}${cl.localidad || cl.cp ? `<div>${esc([cl.cp, cl.localidad].filter(Boolean).join(' '))}</div>` : ''}` : ''}<hr>
     ${t.lineas.map(l => `<div class="fila"><span>${uds(l.unidades)} ${esc(l.descripcion)}</span><span>${euros(l.importe)}</span></div>${l.alergenos ? `<div class="alerg-ticket">Alérgenos: ${esc(l.alergenos)}</div>` : ''}`).join('')}<hr>
     <div class="fila grande"><span>TOTAL</span><span>${euros(t.total)}</span></div>
     ${t.impuestos.map(i => `<div class="fila"><span>Base ${i.iva}%: ${euros(i.base)}</span><span>IVA ${euros(i.cuota)}</span></div>`).join('')}<hr>
-    <div class="fila"><span>${esc(t.forma_cobro)}</span><span>${euros(t.entregado)}</span></div>
+    ${pagos ? pagos.map(p => `<div class="fila"><span>${esc(p.nombre)}</span><span>${euros(p.entregado || p.importe)}</span></div>`).join('')
+      : `<div class="fila"><span>${esc(t.forma_cobro)}</span><span>${euros(t.entregado)}</span></div>`}
     ${t.cambio ? `<div class="fila"><span>Cambio</span><span>${euros(t.cambio)}</span></div>` : ''}
     ${t.anula_ticket_id ? '<div class="c"><b>TICKET DE ANULACIÓN</b></div>' : ''}
+    ${t.factura ? `<div class="c">Incluido en la factura ${esc(t.factura.serie)}-${t.factura.numero}</div>` : ''}
     <div class="c" style="margin-top:8px">Gracias por su visita</div>
   </div>`;
 }
 
 function verTicket(t) {
   abrirModal(`<h2><span>Ticket ${esc(t.serie)}-${t.numero}</span><button data-m="cerrar">✕</button></h2>
-    ${htmlTicket(t, 'FACTURA SIMPLIFICADA')}
-    <div class="botones"><button class="primario" data-m="imprimir">Imprimir</button><button data-m="cerrar">Cerrar</button></div>`);
-  $('#modal-caja').onclick = e => {
+    ${htmlTicket(t, t.anula_ticket_id ? 'ANULACIÓN' : 'FACTURA SIMPLIFICADA')}
+    <div class="botones"><button class="primario" data-m="imprimir">Imprimir</button><button data-m="a4">Imprimir A4</button><button data-m="email">Enviar por email</button><button data-m="cerrar">Cerrar</button></div>`);
+  $('#modal-caja').onclick = e => intentar(async () => {
     const b = e.target.closest('button');
     if (b?.dataset.m === 'cerrar') cerrarModal();
     if (b?.dataset.m === 'imprimir') window.print();
-  };
+    if (b?.dataset.m === 'a4') verDocumentoA4(t, 'Factura simplificada', `/tickets/${t.id}/email`);
+    if (b?.dataset.m === 'email') return enviarPorEmail(`/tickets/${t.id}/email`, t.cliente?.email);
+  });
 }
 
 function verPreticket() {
@@ -690,7 +759,7 @@ async function pintarTickets() {
     <section class="panel scroll">
       ${t ? `${htmlTicket(t, t.anula_ticket_id ? 'ANULACIÓN' : 'FACTURA SIMPLIFICADA')}
         <div class="botones">
-          <button class="primario" id="b-reimprimir">Imprimir</button>
+          <button class="primario" id="b-reimprimir">Imprimir</button><button id="b-a4">A4</button><button id="b-email">Email</button>
           ${!t.anula_ticket_id && !t.anulado_por ? '<button class="peligro" id="b-anular">Anular ticket</button>' : ''}
         </div>` : '<div class="vacio">Selecciona un ticket</div>'}
     </section></div>`;
@@ -698,6 +767,8 @@ async function pintarTickets() {
     const fila = e.target.closest('[data-ticket]');
     if (fila) { E.ticketSel = Number(fila.dataset.ticket); return pintarTickets(); }
     if (e.target.id === 'b-reimprimir') return verTicket(t);
+    if (e.target.id === 'b-a4') return verDocumentoA4(t, 'Factura simplificada', `/tickets/${t.id}/email`);
+    if (e.target.id === 'b-email') return enviarPorEmail(`/tickets/${t.id}/email`, t.cliente?.email);
     if (e.target.id === 'b-anular') {
       if (!confirm(`¿Anular el ticket ${t.serie}-${t.numero}? Se emitirá un ticket en negativo.`)) return;
       const n = await api('POST', `/tickets/${t.id}/anular`);
@@ -918,7 +989,8 @@ async function pintarCierres() {
 
 // ---------- Gestión ----------
 const GESTION = {
-  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['orden_plato_id', 'Orden de plato', 'ordenes_plato'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'], ['alergenos', 'Alérgenos', 'alergenos']] },
+  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['orden_plato_id', 'Orden de plato', 'ordenes_plato'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'], ['alergenos', 'Alérgenos', 'alergenos'], ['codigo_barras', 'Código de barras'], ['controlar_stock', 'Controlar stock', 'bool'], ['stock_minimo', 'Stock mínimo', 'num'], ['coste', 'Coste (€)', 'euros']] },
+  proveedores: { titulo: 'Proveedores', campos: [['nombre', 'Nombre'], ['nif', 'NIF'], ['telefono', 'Teléfono'], ['email', 'Email'], ['direccion', 'Dirección'], ['contacto', 'Persona de contacto'], ['observaciones', 'Observaciones']] },
   familias: { titulo: 'Familias', campos: [['nombre', 'Nombre'], ['color', 'Color', 'color'], ['padre_id', 'Subfamilia de', 'familias'], ['departamento_id', 'Departamento', 'departamentos'], ['orden', 'Orden', 'num'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop']] },
   departamentos: { titulo: 'Departamentos', campos: [['nombre', 'Nombre']] },
   zonas: { titulo: 'Zonas', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipozona'], ['orden', 'Orden', 'num']] },
@@ -927,7 +999,11 @@ const GESTION = {
   operarios: { titulo: 'Operarios', campos: [['nombre', 'Nombre'], ['pin', 'Clave (vacía = entra sin clave)', 'clave'], ['rfid', 'Pulsera RFID', 'rfid'], ['permisos', 'Permisos', 'permisos'], ['orden', 'Orden', 'num']] },
   ordenes_plato: { titulo: 'Órdenes de plato', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
   ivas: { titulo: 'IVAs', campos: [['nombre', 'Nombre'], ['codigo', 'Código'], ['porcentaje', 'IVA %', 'num'], ['recargo', 'Recargo equivalencia %', 'num'], ['orden', 'Orden', 'num']] },
-  puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['usar_permisos', 'Activar permisos de operarios', 'bool'], ['pedir_operario', 'Pedir operario en cada operación', 'bool'], ['cierre_ciego', 'Cierre ciego', 'bool'], ['imprimir_cierre', 'Imprimir el cierre al terminar', 'bool'], ['cierre_secciones', 'Qué sale en el cierre de caja', 'secciones'], ['orden', 'Orden', 'num']] },
+  puestos: { titulo: 'Puestos', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipopuesto'], ['impresora_tickets_id', 'Impresora de tickets', 'impresoras'], ['usar_permisos', 'Activar permisos de operarios', 'bool'], ['pedir_operario', 'Pedir operario en cada operación', 'bool'], ['cierre_ciego', 'Cierre ciego', 'bool'], ['imprimir_cierre', 'Imprimir el cierre al terminar', 'bool'], ['cierre_secciones', 'Qué sale en el cierre de caja', 'secciones'], ['orden', 'Orden', 'num'],
+    ['serie_tickets', 'Serie de tickets de este puesto (vacía = la de la empresa)'], ['serie_facturas', 'Serie de facturas completas de este puesto'],
+    ['smtp_servidor', 'Correo · Servidor SMTP'], ['smtp_puerto', 'Correo · Puerto SMTP', 'num'], ['smtp_cifrado', 'Correo · Cifrado', 'cifrado'], ['smtp_usuario', 'Correo · Usuario'], ['smtp_clave', 'Correo · Contraseña', 'clave'],
+    ['email_emisor', 'Correo · Email emisor'], ['email_asunto', 'Correo · Asunto (vacío = automático)'], ['email_encabezado', 'Correo · Texto de encabezado'], ['email_pie', 'Correo · Texto de pie'],
+    ['mail_en_cierre', 'Enviar el cierre de caja por correo', 'bool'], ['email_cierre', 'Correo · Destinatarios del cierre (separados por ;)']] },
   impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   comentarios: { titulo: 'Comentarios de comanda', campos: [['texto', 'Comentario'], ['familia_id', 'Solo familia', 'familias'], ['articulo_id', 'Solo artículo', 'articulos'], ['orden', 'Orden', 'num']] },
   conceptos_pago: { titulo: 'Conceptos de pago', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
@@ -938,6 +1014,7 @@ const OPCIONES = {
   tipozona: [['mesas', 'Mesas'], ['barra', 'Barra']],
   tipocobro: [['efectivo', 'Efectivo'], ['tarjeta', 'Tarjeta'], ['pendiente', 'Pendiente de cobro'], ['otro', 'Otro']],
   tipopuesto: [['tpv', 'TPV'], ['pda', 'PDA camarero'], ['kds', 'Pantalla de cocina']],
+  cifrado: [['tls', 'TLS (STARTTLS, puerto 587)'], ['ssl', 'SSL (puerto 465)'], ['ninguno', 'Ninguno (puerto 25)']],
   usoimpresora: [['cocina', 'Cocina'], ['barra', 'Barra'], ['tickets', 'Tickets'], ['otro', 'Otro']],
 };
 const REFS = ['familias', 'departamentos', 'zonas', 'impresoras', 'articulos', 'ordenes_plato'];
@@ -988,6 +1065,9 @@ function campoForm([k, etiqueta, tipo], fila) {
   return `<label>${etiqueta}<input name="${k}" ${tipo === 'num' ? 'inputmode="decimal"' : ''} value="${esc(v ?? '')}"></label>`;
 }
 
+// En la lista solo las columnas cortas (el formulario tiene todas).
+const columnasTabla = def => def.campos.filter(([k, et]) => !et.startsWith('Correo') && !/^serie_|^email_|^smtp_|^codigo_barras$|^coste$|^stock_minimo$|^observaciones$|^contacto$|^direccion$/.test(k)).slice(0, 9);
+
 async function pintarGestion(editar) {
   const def = GESTION[E.tablaGestion];
   const filas = await api('GET', `/gestion/${E.tablaGestion}`);
@@ -998,23 +1078,30 @@ async function pintarGestion(editar) {
       <section class="panel scroll">
         <div class="botones"><button class="primario" data-editar="nuevo">+ Añadir</button>
           ${E.tablaGestion === 'articulos' ? '<button data-auto-imagenes="1" title="Busca en el banco una imagen con el mismo nombre que el artículo">Poner imágenes automáticamente</button>' : ''}</div>
-        <table><thead><tr>${def.campos.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>
-        ${filas.map(f => `<tr class="clic ${f.id === editar ? 'sel' : ''}" data-editar="${f.id}">${def.campos.map(([k, , t]) => `<td>${valorCelda(t, f[k])}</td>`).join('')}</tr>`).join('')}
+        <table><thead><tr>${columnasTabla(def).map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>
+        ${filas.map(f => `<tr class="clic ${f.id === editar ? 'sel' : ''}" data-editar="${f.id}">${columnasTabla(def).map(([k, , t]) => `<td>${valorCelda(t, f[k])}</td>`).join('')}</tr>`).join('')}
         </tbody></table>
       </section>
       <section class="panel scroll">
         ${fila ? `<h3>${editar === 'nuevo' ? 'Nuevo' : 'Editar'}</h3>
           <form class="form" id="f-gestion">${def.campos.map(c => campoForm(c, fila)).join('')}
             <div class="botones" style="padding:0"><button class="primario" type="submit">Guardar</button>
-            ${editar !== 'nuevo' ? '<button type="button" class="peligro" id="b-borrar">Borrar</button>' : ''}</div>
+            ${editar !== 'nuevo' ? '<button type="button" class="peligro" id="b-borrar">Borrar</button>' : ''}
+            ${E.tablaGestion === 'puestos' && editar !== 'nuevo' ? '<button type="button" data-probar-correo="1">Probar el correo</button>' : ''}</div>
           </form>` : '<div class="vacio">Selecciona una fila o pulsa Añadir</div>'}
       </section>
     </div></div>`;
 
   $('#vista').onclick = e => intentar(async () => {
-    const b = e.target.closest('[data-volver],[data-editar],#b-borrar,[data-elegir-imagen],[data-quitar-imagen],[data-alergeno],[data-auto-imagenes]');
+    const b = e.target.closest('[data-volver],[data-editar],#b-borrar,[data-elegir-imagen],[data-quitar-imagen],[data-alergeno],[data-auto-imagenes],[data-probar-correo]');
     if (!b) return;
-    if (b.dataset.volver) return ir('config');
+    if (b.dataset.probarCorreo) {
+      const para = prompt('¿A qué correo envío la prueba? (guarda antes los cambios)');
+      if (!para) return;
+      const r = await api('POST', '/correo/prueba', { para });
+      return aviso(`Correo de prueba enviado a ${r.para.join(', ')}`);
+    }
+    if (b.dataset.volver) return ir(E.volverA || 'config');
     if (b.dataset.alergeno) {
       b.classList.toggle('activo');
       const caja = b.closest('.campo-alergenos');
@@ -1073,7 +1160,8 @@ async function pintarGestion(editar) {
 
 async function pintarEmpresa() {
   const emp = await api('GET', '/empresa');
-  const campos = [['nombre', 'Nombre comercial'], ['nif', 'NIF'], ['direccion', 'Dirección'], ['serie_tickets', 'Serie de tickets']];
+  const campos = [['nombre', 'Nombre comercial o razón social'], ['nif', 'NIF'], ['direccion', 'Dirección'], ['localidad', 'CP y localidad'], ['telefono', 'Teléfono'], ['email', 'Email'],
+    ['serie_tickets', 'Serie de tickets (si el puesto no tiene la suya)'], ['serie_facturas', 'Serie de facturas completas (si el puesto no tiene la suya)']];
   $('#vista').innerHTML = `<div class="mesas">
     ${cabeceraConfig('Datos de empresa')}
     <section class="panel" style="max-width:520px"><form class="form" id="f-empresa">
@@ -1094,7 +1182,8 @@ async function pintarEmpresa() {
 
 // ---------- Configuración ----------
 function cabeceraConfig(titulo) {
-  return `<div class="cab-config"><button data-volver="1">← ${esc(E.seccionConfig || 'Configuración')}</button><h2>${esc(titulo)}</h2></div>`;
+  const volver = E.volverA === 'stocks' ? 'Stocks' : E.seccionConfig || 'Configuración';
+  return `<div class="cab-config"><button data-volver="1">← ${esc(volver)}</button><h2>${esc(titulo)}</h2></div>`;
 }
 
 const SECCIONES_CONFIG = [
@@ -1126,6 +1215,7 @@ const SECCIONES_CONFIG = [
     ['ivas', 'IVAs', 'Tipos de IVA y recargo'],
     ['conceptos_pago', 'Conceptos de pago', 'Entradas y salidas de caja'],
   ]],
+  ['Módulos activos', null, 'Clientes, stocks, informes, CashDro, scanner, cocina, pulseras, balanza'],
   ['Personalización', [
     ['empresa', 'Datos de empresa', 'Nombre, NIF, dirección y serie'],
     ['aspecto', 'Aspecto', 'Tamaño de zonas y botones, colores'],
@@ -1140,6 +1230,7 @@ const ICONOS_SECCION = {
   Carta: '<path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"/><path d="M8 9h8M8 13h8"/>',
   Local: '<path d="M3 10l9-6 9 6v10H3z"/><path d="M9 20v-6h6v6"/>',
   'Cobros e impuestos': '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  'Módulos activos': '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M17 13v8M13 17h8"/>',
   Personalización: '<circle cx="12" cy="12" r="9"/><circle cx="8" cy="10" r="1.5"/><circle cx="12" cy="7.5" r="1.5"/><circle cx="16" cy="10" r="1.5"/><path d="M12 21a3 3 0 0 1 0-6h3"/>',
 };
 const iconoSeccion = t => `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONOS_SECCION[t] ?? ''}</svg>`;
@@ -1149,20 +1240,25 @@ function pintarConfig() {
   $('#vista').innerHTML = sec
     ? `<div class="config scroll">
         <div class="cab-config"><button data-secciones="1">← Configuración</button><h2>${iconoSeccion(sec[0])} ${esc(sec[0])}</h2></div>
-        <div class="baldosas" style="margin-top:14px">${sec[1].map(([k, t, d]) => `<button data-ir="${k}"><b>${t}</b><span>${d}</span></button>`).join('')}</div>
+        <div class="baldosas" style="margin-top:14px">${sec[1].map(([k, t, d]) => { const m = MODULO_DE_PANTALLA[k]; const cerrado = m && !moduloActivo(m);
+          return `<button data-ir="${k}" class="${cerrado ? 'bloqueado' : ''}"><b>${cerrado ? '🔒 ' : ''}${t}</b><span>${cerrado ? 'Necesita el módulo ' + esc(E.datos.licencia.modulos_disponibles[m]) : d}</span></button>`; }).join('')}</div>
       </div>`
     : `<div class="config scroll">
         <h2>${ICONO_HERRAMIENTAS} Configuración</h2>
-        <div class="secciones-config">${SECCIONES_CONFIG.map(([t, items]) => `<button data-seccion="${esc(t)}">${iconoSeccion(t)}<b>${esc(t)}</b>
-          <span>${items.map(i => esc(i[1])).join(' · ')}</span></button>`).join('')}</div>
+        <div class="secciones-config">${SECCIONES_CONFIG.map(([t, items, desc]) => `<button data-seccion="${esc(t)}">${iconoSeccion(t)}<b>${esc(t)}</b>
+          <span>${items ? items.map(i => esc(i[1])).join(' · ') : esc(desc)}</span></button>`).join('')}</div>
       </div>`;
   $('#vista').onclick = e => intentar(async () => {
     const s = e.target.closest('[data-seccion]');
-    if (s) { E.seccionConfig = s.dataset.seccion; return pintarConfig(); }
+    if (s) {
+      if (s.dataset.seccion === 'Módulos activos') return ir('modulos');
+      E.seccionConfig = s.dataset.seccion; return pintarConfig();
+    }
     if (e.target.closest('[data-secciones]')) { E.seccionConfig = null; return pintarConfig(); }
     const b = e.target.closest('[data-ir]');
     if (!b) return;
     const k = b.dataset.ir;
+    if (MODULO_DE_PANTALLA[k] && !moduloActivo(MODULO_DE_PANTALLA[k])) return ir('modulos');
     if (k === 'este_puesto') return elegirPuesto();
     if (k === 'escala') return elegirEscala();
     if (k === 'carta_demo') {
@@ -1328,6 +1424,7 @@ function mostrarPanelOperarios() {
   let buf = '', ultimo = 0;
   document.addEventListener('keydown', e => {
     if (e.target.closest?.('input, textarea, select')) return;
+    if (!moduloActivo('pulseras')) return;
     const ahora = Date.now();
     if (ahora - ultimo > 80) buf = '';
     ultimo = ahora;
@@ -1824,3 +1921,378 @@ intentar(async () => {
   conectarEventos();
   if (!E.operario && puestoPideOperario()) mostrarPanelOperarios();
 });
+
+// ---------- Módulos con licencia ----------
+const moduloActivo = m => !!E.datos?.licencia?.activos?.includes(m);
+// Pantallas de configuración que necesitan un módulo.
+const MODULO_DE_PANTALLA = { borrados: 'informes', empleados: 'informes' };
+
+function pantallaBloqueada(m, titulo) {
+  $('#vista').innerHTML = `<div class="bloqueo"><div>
+    <div class="candado">🔒</div><h2>${esc(titulo)}</h2>
+    <p>Necesitas el módulo <b>${esc(E.datos.licencia.modulos_disponibles[m])}</b>. Actívalo con tu licencia en Configuración &gt; Módulos activos.</p>
+    ${tienePermiso('configuracion') ? '<button class="primario" data-ir-modulos="1">Ver módulos activos</button>' : ''}</div></div>`;
+  $('#vista').onclick = e => { if (e.target.closest('[data-ir-modulos]')) intentar(() => ir('modulos')); };
+}
+
+function pintarModulos() {
+  const l = E.datos.licencia;
+  $('#vista').innerHTML = `<div class="config scroll">
+    ${cabeceraConfig('Módulos activos')}
+    <div class="licencia-cab">
+      <div class="cifra"><small>Identificador de esta instalación</small><b class="inst" title="Dáselo a LevaDigital para pedir la licencia">${esc(l.instalacion)}</b></div>
+      <div class="cifra"><small>Titular</small><b>${esc(l.titular || '—')}</b></div>
+      <div class="cifra"><small>Caduca</small><b>${l.caduca ? esc(l.caduca.split('-').reverse().join('/')) : l.activos.length ? 'Sin caducidad' : '—'}</b></div>
+    </div>
+    ${l.aviso ? `<div class="aviso-licencia">${esc(l.aviso)}</div>` : ''}
+    <div class="modulos">${Object.entries(l.modulos_disponibles).map(([k, t]) => `<div class="modulo ${l.activos.includes(k) ? 'activo' : ''}">
+      <b>${esc(t)}</b><span>${l.activos.includes(k) ? '✓ Activo' : '🔒 Sin licencia'}</span></div>`).join('')}</div>
+    <h3>Activar licencia</h3>
+    <div class="form" style="padding:0;max-width:760px">
+      <label>Pega aquí el código de licencia que te ha dado LevaDigital<textarea id="codigo-licencia" rows="4" placeholder="LEVA1...."></textarea></label>
+      <div><button class="primario" id="b-activar" style="padding:12px 26px;font-weight:700">Activar</button></div>
+    </div></div>`;
+  $('#vista').onclick = e => intentar(async () => {
+    if (e.target.closest('[data-volver]')) return ir('config');
+    if (e.target.id === 'b-activar') {
+      E.datos.licencia = await api('POST', '/licencia', { codigo: $('#codigo-licencia').value });
+      aviso(`Licencia activada: ${E.datos.licencia.activos.length} módulos`);
+      return pintarModulos();
+    }
+  });
+}
+
+// ---------- Documento A4 (factura simplificada o factura completa) ----------
+function htmlA4(d, titulo) {
+  const e = d.empresa, c = d.cliente;
+  const fecha = (d.emitido_en ?? d.fecha) ? hora(d.emitido_en ?? d.fecha) : '';
+  return `<div class="documento">
+    <div class="doc-cab">
+      <div><b class="doc-empresa">${esc(e.nombre)}</b><br>${esc(e.direccion)}${e.localidad ? '<br>' + esc(e.localidad) : ''}${e.nif ? '<br>NIF ' + esc(e.nif) : ''}${e.telefono ? '<br>Tel. ' + esc(e.telefono) : ''}</div>
+      <div class="d"><b class="doc-titulo">${esc(titulo.toUpperCase())}</b><br>Nº ${esc(d.serie)}-${d.numero}<br>${fecha}</div>
+    </div>
+    ${c ? `<div class="doc-cliente"><small>Cliente</small><b>${esc(c.nombre)}</b>${c.nif ? '<br>NIF ' + esc(c.nif) : ''}${c.domicilio ? '<br>' + esc(c.domicilio) : ''}${c.cp || c.localidad ? '<br>' + esc([c.cp, c.localidad, c.provincia].filter(Boolean).join(' ')) : ''}</div>` : ''}
+    <table class="doc-lineas"><thead><tr><th>Descripción</th><th class="num">Uds.</th><th class="num">Precio</th><th class="num">IVA</th><th class="num">Importe</th></tr></thead><tbody>
+      ${d.lineas.map(l => `<tr><td>${esc(l.descripcion)}</td><td class="num">${uds(l.unidades)}</td><td class="num">${euros(l.precio)}</td><td class="num">${l.iva}%</td><td class="num">${euros(l.importe)}</td></tr>`).join('')}
+    </tbody></table>
+    <table class="doc-totales">${d.impuestos.map(i => `<tr><td>Base ${i.iva}%</td><td class="num">${euros(i.base)}</td><td>Cuota IVA</td><td class="num">${euros(i.cuota)}</td></tr>`).join('')}
+      <tr class="doc-total"><td colspan="3">TOTAL</td><td class="num">${euros(d.total)}</td></tr></table>
+    ${d.pagos?.length ? `<p class="doc-nota">Forma de pago: ${d.pagos.map(p => esc(p.nombre) + ' ' + euros(p.importe)).join(' · ')}</p>` : ''}
+    ${d.tickets ? `<p class="doc-nota">Esta factura sustituye a las facturas simplificadas: ${d.tickets.map(t => esc(t.serie + '-' + t.numero)).join(', ')}</p>` : ''}
+  </div>`;
+}
+
+function verDocumentoA4(d, titulo, rutaEmail) {
+  abrirModal(`<h2><span>${esc(titulo)} ${esc(d.serie)}-${d.numero}</span><button data-m="cerrar">✕</button></h2>
+    <div class="doc-marco">${htmlA4(d, titulo)}</div>
+    <div class="botones"><button class="primario" data-m="imprimir">Imprimir A4</button>${rutaEmail ? '<button data-m="email">Enviar por email</button>' : ''}<button data-m="cerrar">Cerrar</button></div>`);
+  $('#modal-caja').classList.add('a4');
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (b?.dataset.m === 'cerrar') { $('#modal-caja').classList.remove('a4'); return cerrarModal(); }
+    if (b?.dataset.m === 'imprimir') return window.print();
+    if (b?.dataset.m === 'email') return enviarPorEmail(rutaEmail, d.cliente?.email);
+  });
+}
+
+async function enviarPorEmail(ruta, sugerido = '') {
+  const para = prompt('Enviar por email a:', sugerido || '');
+  if (!para) return;
+  const r = await api('POST', ruta, { para });
+  aviso(`Enviado a ${r.para.join(', ')}`);
+}
+
+// ---------- Clientes ----------
+function elegirClienteCuenta() {
+  if (!moduloActivo('clientes')) return aviso('El módulo de clientes no está activo', true);
+  E.eligiendoCliente = true;
+  E.fichaCliente = null;
+  return ir('clientes');
+}
+
+const CAMPOS_CLIENTE = [['nombre', 'Nombre o razón social *'], ['apellidos', 'Apellidos'], ['nif', 'NIF / CIF'], ['telefono', 'Teléfono'], ['email', 'Email'],
+  ['domicilio', 'Domicilio'], ['cp', 'Código postal'], ['localidad', 'Localidad'], ['provincia', 'Provincia'], ['apodo', 'Apodo (para buscarlo)'], ['observaciones', 'Observaciones']];
+
+function formCliente(c, alGuardar) {
+  abrirModal(`<h2><span>${c ? 'Editar cliente' : 'Nuevo cliente'}</span><button data-m="cerrar">✕</button></h2>
+    <form class="form form-cliente" autocomplete="off">
+      ${CAMPOS_CLIENTE.map(([k, t]) => `<label class="${k === 'nombre' || k === 'domicilio' || k === 'observaciones' ? 'ancho' : ''}">${t}<input name="${k}" value="${esc(c?.[k] ?? '')}" ${k === 'email' ? 'type="email"' : ''} ${k === 'telefono' || k === 'cp' ? 'inputmode="tel"' : ''}></label>`).join('')}
+      <small class="ancho tenue">Para hacer una factura completa hacen falta el NIF y el domicilio.</small>
+      <div class="botones ancho" style="padding:0"><button type="submit" class="primario">Guardar</button><button type="button" data-m="cerrar">Cancelar</button></div>
+    </form>`);
+  setTimeout(() => $('#modal-caja [name=nombre]')?.focus(), 30);
+  $('#modal-caja').onclick = e => { if (e.target.closest('[data-m="cerrar"]')) cerrarModal(); };
+  $('#modal-caja form').onsubmit = ev => {
+    ev.preventDefault();
+    intentar(async () => {
+      const datos = Object.fromEntries(new FormData(ev.target));
+      if (!datos.nombre.trim()) return aviso('Escribe el nombre del cliente', true);
+      const r = c ? await api('PUT', `/gestion/clientes/${c.id}`, datos) : await api('POST', '/gestion/clientes', datos);
+      cerrarModal();
+      aviso(c ? 'Cliente guardado' : 'Cliente creado');
+      return alGuardar(r);
+    });
+  };
+}
+
+async function asignarCliente(id) {
+  E.cuenta = await api('PATCH', `/cuentas/${E.cuenta.id}`, { cliente_id: id });
+  E.eligiendoCliente = false;
+  aviso(id ? `Cliente asignado: ${E.cuenta.cliente?.nombre ?? ''}` : 'Cliente quitado de la cuenta');
+  await ir('venta');
+  if (E.volverCobro) { E.volverCobro = false; if (E.cuenta?.lineas.length) abrirCobro(); }
+}
+
+const iniciales = c => ((c.nombre?.[0] ?? '') + (c.apellidos?.[0] ?? c.nombre?.split(' ')[1]?.[0] ?? '')).toUpperCase();
+const PULSACION_FICHA_MS = 2000;
+
+async function pintarClientes() {
+  if (!moduloActivo('clientes')) return pantallaBloqueada('clientes', 'Clientes');
+  if (E.fichaCliente) return pintarFicha(E.fichaCliente);
+  if (E.cuenta) E.cuenta = await api('GET', `/cuentas/${E.cuenta.id}`).then(c => c.estado === 'abierta' ? c : null).catch(() => null);
+  const asignar = !!E.cuenta;
+  $('#vista').innerHTML = `<div class="clientes">
+    <div class="clientes-barra">
+      <input id="q-clientes" type="search" placeholder="Buscar por nombre, NIF, teléfono o apodo" value="${esc(E.qClientes ?? '')}" autocomplete="off">
+      <button class="primario nuevo-cliente" id="b-nuevo-cliente">＋ Nuevo cliente</button>
+    </div>
+    ${asignar ? `<div class="banda-asignar">Toca un cliente para asignarlo a <b>${esc(nombreCuenta(E.cuenta))}</b>. Para ver su ficha, pulsa <b>Ficha</b> o mantén pulsado 2 segundos.
+      ${E.cuenta.cliente ? `<button id="b-quitar-cliente">Quitar ${esc(E.cuenta.cliente.nombre)}</button>` : ''}<button id="b-volver-venta">Volver a la venta</button></div>`
+      : '<div class="banda-asignar tenue">Toca un cliente (o mantén pulsado 2 segundos) para abrir su ficha. Con una cuenta abierta, al tocarlo se asigna a la cuenta.</div>'}
+    <div class="lista-clientes" id="lista-clientes"></div>
+  </div>`;
+  const pintarLista = async () => {
+    const lista = await api('GET', `/clientes?q=${encodeURIComponent(E.qClientes ?? '')}`);
+    const actual = E.cuenta?.cliente_id;
+    $('#lista-clientes').innerHTML = lista.map(c => `<div class="tarjeta-cliente ${c.id === actual ? 'actual' : ''}" data-cliente="${c.id}">
+        <i class="avatar">${esc(iniciales(c))}</i>
+        <div class="tc-datos"><b>${esc(c.nombre)} ${esc(c.apellidos ?? '')}</b><small>${[c.nif, c.telefono, c.localidad].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</small></div>
+        <button class="tc-ficha" data-ficha="${c.id}">Ficha</button>
+      </div>`).join('') || `<div class="vacio">${E.qClientes ? 'Ningún cliente coincide con la búsqueda' : 'Todavía no hay clientes. Crea el primero con «Nuevo cliente».'}</div>`;
+  };
+  await pintarLista();
+  let t;
+  $('#q-clientes').oninput = e => { E.qClientes = e.target.value; clearTimeout(t); t = setTimeout(() => intentar(pintarLista), 200); };
+  // Pulsación larga (2 s) sobre un cliente: abre la ficha.
+  let largo = null, abierto = false;
+  const lista = $('#lista-clientes');
+  lista.onpointerdown = e => {
+    const el = e.target.closest('[data-cliente]');
+    if (!el || e.target.closest('[data-ficha]')) return;
+    abierto = false;
+    el.classList.add('pulsando');
+    largo = setTimeout(() => { abierto = true; el.classList.remove('pulsando'); E.fichaCliente = Number(el.dataset.cliente); intentar(() => pintarFicha(E.fichaCliente)); }, PULSACION_FICHA_MS);
+  };
+  const soltar = () => { clearTimeout(largo); lista.querySelectorAll('.pulsando').forEach(x => x.classList.remove('pulsando')); };
+  lista.onpointerup = soltar; lista.onpointerleave = soltar; lista.onpointercancel = soltar;
+  $('#vista').onclick = e => intentar(async () => {
+    if (e.target.id === 'b-nuevo-cliente') return formCliente(null, async c => { if (E.cuenta && E.eligiendoCliente) return asignarCliente(c.id); E.qClientes = ''; return pintarClientes(); });
+    if (e.target.id === 'b-quitar-cliente') return asignarCliente(null);
+    if (e.target.id === 'b-volver-venta') { E.eligiendoCliente = false; const v = E.volverCobro; E.volverCobro = false; await ir('venta'); if (v && E.cuenta?.lineas.length) abrirCobro(); return; }
+    const f = e.target.closest('[data-ficha]');
+    if (f) { E.fichaCliente = Number(f.dataset.ficha); return pintarFicha(E.fichaCliente); }
+    const c = e.target.closest('[data-cliente]');
+    if (!c || abierto) return;
+    if (E.cuenta) return asignarCliente(Number(c.dataset.cliente));
+    E.fichaCliente = Number(c.dataset.cliente);
+    return pintarFicha(E.fichaCliente);
+  });
+}
+
+const fechaCorta = s => s ? hora(s).split(',')[0] : '—';
+
+async function pintarFicha(id) {
+  const q = new URLSearchParams();
+  if (E.fichaDesde) q.set('desde', E.fichaDesde);
+  if (E.fichaHasta) q.set('hasta', E.fichaHasta);
+  const f = await api('GET', `/clientes/${id}/ficha?${q}`);
+  const c = f.cliente, s = f.estadisticas;
+  $('#vista').innerHTML = `<div class="informe scroll ficha">
+    <div class="cab-config"><button data-volver-lista="1">← Clientes</button>
+      <h2><i class="avatar">${esc(iniciales(c))}</i> ${esc(c.nombre)} ${esc(c.apellidos ?? '')}</h2>
+      <div class="cab-acciones">${E.cuenta ? '<button class="primario" data-asignar="1">Asignar a la cuenta</button>' : ''}<button data-editar="1">Editar datos</button></div></div>
+    <div class="ficha-datos">${[['NIF', c.nif], ['Teléfono', c.telefono], ['Email', c.email], ['Domicilio', [c.domicilio, c.cp, c.localidad, c.provincia].filter(Boolean).join(', ')], ['Observaciones', c.observaciones]]
+      .filter(([, v]) => v).map(([k, v]) => `<span><small>${k}</small>${esc(v)}</span>`).join('') || '<span class="tenue">Sin datos fiscales. Edita el cliente para añadir NIF y domicilio.</span>'}</div>
+    <div class="periodo">Periodo <input type="date" id="f-desde" value="${esc(E.fichaDesde ?? '')}"> a <input type="date" id="f-hasta" value="${esc(E.fichaHasta ?? '')}">
+      <button id="b-periodo">Aplicar</button>${E.fichaDesde || E.fichaHasta ? '<button id="b-todo">Todo</button>' : ''}</div>
+    <div class="cifras">
+      <div class="cifra"><small>Visitas</small><b>${s.visitas}</b></div>
+      <div class="cifra"><small>Total gastado</small><b>${euros(s.gastado)}</b></div>
+      <div class="cifra"><small>Ticket medio</small><b>${euros(s.ticket_medio)}</b></div>
+      <div class="cifra"><small>Primera visita</small><b>${fechaCorta(s.primera)}</b></div>
+      <div class="cifra"><small>Última visita</small><b>${fechaCorta(s.ultima)}</b></div>
+    </div>
+    <section class="panel factura-caja">
+      <div><b>Factura completa</b><br><small>${f.sin_facturar.tickets ? `${f.sin_facturar.tickets} tickets sin facturar en este periodo · ${euros(f.sin_facturar.total)}` : 'No hay tickets sin facturar en este periodo'}</small></div>
+      <button class="primario" id="b-factura" ${f.sin_facturar.tickets ? '' : 'disabled'}>Hacer factura completa</button>
+    </section>
+    <div class="dos-col ficha-col">
+      <section class="panel"><h3>Tickets</h3><table><thead><tr><th>Ticket</th><th>Fecha</th><th>Factura</th><th class="num">Total</th></tr></thead><tbody>
+        ${f.tickets.map(t => `<tr class="clic ${t.anulado_por ? 'anulado' : ''}" data-ticket="${t.id}"><td>${esc(t.serie)}-${t.numero}${t.anula_ticket_id ? ' (anulación)' : ''}</td><td>${hora(t.emitido_en)}</td><td>${esc(t.factura ?? '')}</td><td class="num">${euros(t.total)}</td></tr>`).join('')
+          || '<tr><td colspan="4" class="vacio">Sin tickets</td></tr>'}</tbody></table></section>
+      <div>
+        <section class="panel"><h3>Lo que más pide</h3><table><tbody>
+          ${f.articulos.map(a => `<tr><td>${esc(a.nombre)}</td><td class="num">${uds(a.unidades)}</td><td class="num">${euros(a.total)}</td></tr>`).join('') || '<tr><td class="vacio">—</td></tr>'}</tbody></table></section>
+        <section class="panel" style="margin-top:10px"><h3>Facturas completas</h3><table><tbody>
+          ${f.facturas.map(x => `<tr class="clic" data-factura="${x.id}"><td><b>${esc(x.serie)}-${x.numero}</b></td><td>${fechaCorta(x.fecha)}</td><td class="num">${euros(x.total)}</td></tr>`).join('') || '<tr><td class="vacio">Sin facturas</td></tr>'}</tbody></table></section>
+      </div>
+    </div></div>`;
+  $('#vista').onclick = e => intentar(async () => {
+    if (e.target.closest('[data-volver-lista]')) { E.fichaCliente = null; return pintarClientes(); }
+    if (e.target.closest('[data-asignar]')) { E.fichaCliente = null; return asignarCliente(id); }
+    if (e.target.closest('[data-editar]')) return formCliente(c, () => pintarFicha(id));
+    if (e.target.id === 'b-periodo') { E.fichaDesde = $('#f-desde').value || null; E.fichaHasta = $('#f-hasta').value || null; return pintarFicha(id); }
+    if (e.target.id === 'b-todo') { E.fichaDesde = E.fichaHasta = null; return pintarFicha(id); }
+    if (e.target.id === 'b-factura') {
+      if (!confirm(`Se hará una factura completa a ${c.nombre} con ${f.sin_facturar.tickets} tickets (${euros(f.sin_facturar.total)}). Esos tickets quedarán sustituidos por la factura. ¿Seguir?`)) return;
+      const fac = await api('POST', `/clientes/${id}/factura`, { desde: E.fichaDesde, hasta: E.fichaHasta });
+      await pintarFicha(id);
+      return verDocumentoA4(fac, 'Factura', `/facturas/${fac.id}/email`);
+    }
+    const t = e.target.closest('[data-ticket]');
+    if (t) return verTicket(await api('GET', `/tickets/${t.dataset.ticket}`));
+    const x = e.target.closest('[data-factura]');
+    if (x) { const fac = await api('GET', `/facturas/${x.dataset.factura}`); return verDocumentoA4(fac, 'Factura', `/facturas/${fac.id}/email`); }
+  });
+}
+
+// ---------- Stocks ----------
+const numES = n => Number(n ?? 0).toLocaleString('es-ES', { maximumFractionDigits: 3 });
+const leerNum = s => Number(String(s ?? '').replace(',', '.'));
+
+async function pintarStocks() {
+  if (!moduloActivo('stocks')) return pantallaBloqueada('stocks', 'Stocks');
+  const tab = E.tabStocks ?? 'existencias';
+  if (tab === 'proveedores') { E.volverA = 'stocks'; E.tablaGestion = 'proveedores'; E.tabStocks = 'existencias'; return pintarGestion(); }
+  const pestanas = `<div class="pestanas">${[['existencias', 'Existencias'], ['albaranes', 'Albaranes de compra'], ['proveedores', 'Proveedores']]
+    .map(([k, t]) => `<button data-tab="${k}" class="${k === tab || (k === 'albaranes' && tab === 'nuevo_albaran') ? 'activa' : ''}">${t}</button>`).join('')}</div>`;
+  if (tab === 'nuevo_albaran') return pintarNuevoAlbaran(pestanas);
+  if (tab === 'albaranes') {
+    const lista = await api('GET', '/stocks/albaranes');
+    $('#vista').innerHTML = `<div class="informe scroll">${pestanas}
+      <div><button class="primario" id="b-nuevo-albaran">＋ Nuevo albarán de compra</button></div>
+      <section class="panel"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Nº albarán</th><th class="num">Líneas</th><th class="num">Total</th></tr></thead><tbody>
+        ${lista.map(a => `<tr class="clic" data-albaran="${a.id}"><td>${esc(a.fecha.split('-').reverse().join('/'))}</td><td>${esc(a.proveedor)}</td><td>${esc(a.numero || '—')}</td><td class="num">${a.lineas}</td><td class="num">${euros(a.total)}</td></tr>`).join('')
+          || '<tr><td colspan="5" class="vacio">Todavía no hay albaranes. Las compras suman al stock.</td></tr>'}</tbody></table></section></div>`;
+  } else {
+    const solo = E.stockSolo ?? true;
+    const lista = await api('GET', `/stocks${solo ? '?solo=1' : ''}`);
+    const q = (E.qStock ?? '').toLowerCase();
+    const filas = lista.filter(a => !q || a.nombre.toLowerCase().includes(q) || (a.familia ?? '').toLowerCase().includes(q));
+    const bajos = lista.filter(a => a.controlar_stock && a.stock <= a.stock_minimo).length;
+    $('#vista').innerHTML = `<div class="informe scroll">${pestanas}
+      <div class="clientes-barra"><input id="q-stock" type="search" placeholder="Buscar artículo o familia" value="${esc(E.qStock ?? '')}">
+        <label class="chk"><input type="checkbox" id="solo-stock" ${solo ? 'checked' : ''}> Solo artículos con control de stock</label></div>
+      ${bajos ? `<div class="aviso-licencia">${bajos} artículos agotados o por debajo del stock mínimo</div>` : ''}
+      <section class="panel"><table><thead><tr><th>Artículo</th><th>Familia</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Coste</th><th class="num">Valor</th></tr></thead><tbody>
+        ${filas.map(a => `<tr class="clic ${a.controlar_stock && a.stock <= a.stock_minimo ? 'bajo' : ''}" data-art="${a.id}"><td>${esc(a.nombre)}</td><td>${esc(a.familia ?? '')}</td>
+          <td class="num"><b>${numES(a.stock)}</b></td><td class="num">${a.controlar_stock ? numES(a.stock_minimo) : '—'}</td><td class="num">${a.coste ? euros(a.coste) : '—'}</td><td class="num">${a.coste && a.stock > 0 ? euros(Math.round(a.coste * a.stock)) : '—'}</td></tr>`).join('')
+          || `<tr><td colspan="6" class="vacio">${solo ? 'Ningún artículo controla stock todavía. Se activa solo al meter un albarán, o quita la marca para verlos todos.' : 'Sin artículos'}</td></tr>`}</tbody></table></section></div>`;
+    let t;
+    $('#q-stock').oninput = e => { E.qStock = e.target.value; clearTimeout(t); t = setTimeout(() => intentar(async () => { await pintarStocks(); const i = $('#q-stock'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
+    $('#solo-stock').onchange = e => { E.stockSolo = e.target.checked; intentar(pintarStocks); };
+  }
+  $('#vista').onclick = e => intentar(async () => {
+    const p = e.target.closest('[data-tab]');
+    if (p) { E.tabStocks = p.dataset.tab; return pintarStocks(); }
+    if (e.target.id === 'b-nuevo-albaran') { E.tabStocks = 'nuevo_albaran'; E.albaran = null; return pintarStocks(); }
+    const a = e.target.closest('[data-albaran]');
+    if (a) return verAlbaran(await api('GET', `/stocks/albaranes/${a.dataset.albaran}`));
+    const r = e.target.closest('[data-art]');
+    if (r) return verStockArticulo(Number(r.dataset.art));
+  });
+}
+
+async function verStockArticulo(id) {
+  const art = E.datos.articulos.find(a => a.id === id) ?? { nombre: 'Artículo' };
+  const [lista, movs] = await Promise.all([api('GET', '/stocks'), api('GET', `/stocks/articulo/${id}`)]);
+  const actual = lista.find(a => a.id === id)?.stock ?? 0;
+  const TIPOS = { compra: 'Compra', venta: 'Venta', ajuste: 'Inventario' };
+  abrirModal(`<h2><span>${esc(art.nombre)} · stock ${numES(actual)}</span><button data-m="cerrar">✕</button></h2>
+    <div class="form" style="grid-template-columns:1fr 2fr auto;align-items:end">
+      <label>Stock contado<input id="nuevo-stock" inputmode="decimal" value="${numES(actual)}"></label>
+      <label>Nota<input id="nota-stock" placeholder="Inventario, rotura, consumo propio..."></label>
+      <button class="primario" data-m="ajustar" style="padding:10px 16px">Ajustar</button>
+    </div>
+    <div class="scroll" style="max-height:50vh"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Nota</th><th class="num">Cantidad</th></tr></thead><tbody>
+      ${movs.map(m => `<tr><td>${esc(String(m.fecha ?? '').slice(8, 10) + '/' + String(m.fecha ?? '').slice(5, 7) + ' ' + String(m.fecha ?? '').slice(11, 16))}</td><td>${TIPOS[m.tipo] ?? esc(m.tipo)}</td><td>${esc(m.nota ?? '')}</td><td class="num ${m.cantidad < 0 ? 'falta' : 'sobra'}">${m.cantidad > 0 ? '+' : ''}${numES(m.cantidad)}</td></tr>`).join('')
+        || '<tr><td colspan="4" class="vacio">Sin movimientos</td></tr>'}</tbody></table></div>`);
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (b?.dataset.m === 'cerrar') return cerrarModal();
+    if (b?.dataset.m === 'ajustar') {
+      const r = await api('POST', '/stocks/ajuste', { articulo_id: id, stock: leerNum($('#nuevo-stock').value), nota: $('#nota-stock').value });
+      aviso(r.diferencia ? `Stock ajustado (${r.diferencia > 0 ? '+' : ''}${numES(r.diferencia)})` : 'El stock ya era ese');
+      cerrarModal();
+      return pintarStocks();
+    }
+  });
+}
+
+function verAlbaran(a) {
+  abrirModal(`<h2><span>Albarán ${esc(a.numero || a.id)} · ${esc(a.proveedor)}</span><button data-m="cerrar">✕</button></h2>
+    <div style="padding:0 12px"><small class="tenue">${esc(a.fecha.split('-').reverse().join('/'))}${a.operario ? ' · ' + esc(a.operario) : ''}${a.notas ? ' · ' + esc(a.notas) : ''}</small></div>
+    <table><thead><tr><th>Artículo</th><th class="num">Cantidad</th><th class="num">Coste</th><th class="num">Importe</th></tr></thead><tbody>
+      ${a.lineas.map(l => `<tr><td>${esc(l.descripcion)}</td><td class="num">${numES(l.cantidad)}</td><td class="num">${euros(l.coste)}</td><td class="num">${euros(Math.round(l.cantidad * l.coste))}</td></tr>`).join('')}
+      <tr><td colspan="3"><b>Total</b></td><td class="num"><b>${euros(a.total)}</b></td></tr></tbody></table>
+    <div class="botones"><button data-m="cerrar">Cerrar</button></div>`);
+  $('#modal-caja').onclick = e => { if (e.target.closest('[data-m="cerrar"]')) cerrarModal(); };
+}
+
+async function pintarNuevoAlbaran(pestanas) {
+  const provs = await api('GET', '/gestion/proveedores');
+  const al = E.albaran ??= { proveedor_id: provs[0]?.id ?? '', numero: '', fecha: hoyLocal(), notas: '', lineas: [] };
+  const total = al.lineas.reduce((n, l) => n + Math.round(leerNum(l.cantidad) * Math.round(leerNum(l.coste) * 100)), 0);
+  const arts = E.datos.articulos.filter(a => a.activo);
+  $('#vista').innerHTML = `<div class="informe scroll">${pestanas}
+    <h3>Nuevo albarán de compra</h3>
+    ${provs.length ? '' : '<div class="aviso-licencia">Primero crea un proveedor en la pestaña Proveedores.</div>'}
+    <div class="form albaran-cab" style="padding:0">
+      <label>Proveedor<select data-al="proveedor_id">${provs.map(p => `<option value="${p.id}" ${p.id === Number(al.proveedor_id) ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></label>
+      <label>Nº de albarán<input data-al="numero" value="${esc(al.numero)}"></label>
+      <label>Fecha<input type="date" data-al="fecha" value="${esc(al.fecha)}"></label>
+      <label>Notas<input data-al="notas" value="${esc(al.notas)}"></label>
+    </div>
+    <section class="panel"><table><thead><tr><th>Artículo</th><th class="num">Cantidad</th><th class="num">Coste unidad (€)</th><th class="num">Importe</th><th></th></tr></thead><tbody>
+      ${al.lineas.map((l, i) => { const a = arts.find(x => x.id === l.articulo_id); return `<tr><td>${esc(a?.nombre ?? '')}</td>
+        <td class="num"><input class="mini-num" data-l="${i}" data-k="cantidad" inputmode="decimal" value="${esc(l.cantidad)}"></td>
+        <td class="num"><input class="mini-num" data-l="${i}" data-k="coste" inputmode="decimal" value="${esc(l.coste)}"></td>
+        <td class="num">${euros(Math.round(leerNum(l.cantidad) * Math.round(leerNum(l.coste) * 100)))}</td><td><button data-quitar-l="${i}">✕</button></td></tr>`; }).join('')
+        || '<tr><td colspan="5" class="vacio">Añade los artículos del albarán</td></tr>'}
+      <tr><td><input id="buscar-art" list="lista-arts" placeholder="Escribe para añadir un artículo..." autocomplete="off" style="width:100%"><datalist id="lista-arts">${arts.map(a => `<option value="${esc(a.nombre)}">`).join('')}</datalist></td>
+        <td colspan="2"></td><td class="num"><b>${euros(total)}</b></td><td></td></tr>
+    </tbody></table></section>
+    <div class="botones" style="padding:0"><button class="primario" id="b-guardar-albaran" ${al.lineas.length && provs.length ? '' : 'disabled'}>Guardar albarán (suma al stock)</button><button id="b-cancelar-albaran">Cancelar</button></div>
+  </div>`;
+  const v = $('#vista');
+  v.oninput = e => {
+    if (e.target.dataset.al) al[e.target.dataset.al] = e.target.value;
+    if (e.target.dataset.l !== undefined) al.lineas[Number(e.target.dataset.l)][e.target.dataset.k] = e.target.value;
+  };
+  v.onchange = e => {
+    if (e.target.dataset.l !== undefined) return pintarStocks();
+    if (e.target.id === 'buscar-art') {
+      const a = arts.find(x => x.nombre.toLowerCase() === e.target.value.trim().toLowerCase());
+      if (!a) return aviso('Elige un artículo de la lista', true);
+      e.target.value = '';
+      const ya = al.lineas.find(l => l.articulo_id === a.id);
+      if (ya) ya.cantidad = String(leerNum(ya.cantidad) + 1);
+      else al.lineas.push({ articulo_id: a.id, cantidad: '1', coste: a.coste ? (a.coste / 100).toFixed(2).replace('.', ',') : '' });
+      intentar(async () => { await pintarStocks(); $('#buscar-art')?.focus(); });
+    }
+  };
+  v.onclick = e => intentar(async () => {
+    const p = e.target.closest('[data-tab]');
+    if (p) { E.tabStocks = p.dataset.tab; return pintarStocks(); }
+    if (e.target.dataset.quitarL !== undefined) { al.lineas.splice(Number(e.target.dataset.quitarL), 1); return pintarStocks(); }
+    if (e.target.id === 'b-cancelar-albaran') { E.albaran = null; E.tabStocks = 'albaranes'; return pintarStocks(); }
+    if (e.target.id === 'b-guardar-albaran') {
+      const r = await api('POST', '/stocks/albaranes', { ...al, proveedor_id: Number(al.proveedor_id),
+        lineas: al.lineas.map(l => ({ articulo_id: l.articulo_id, cantidad: leerNum(l.cantidad), coste: Math.round(leerNum(l.coste) * 100) })) });
+      E.albaran = null; E.tabStocks = 'albaranes';
+      E.datos = await api('GET', '/inicio');
+      aviso(`Albarán guardado: ${r.lineas.length} artículos suman al stock`);
+      return pintarStocks();
+    }
+  });
+}
