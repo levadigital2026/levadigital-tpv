@@ -321,6 +321,25 @@ CREATE TABLE IF NOT EXISTS albaran_lineas (
   cantidad REAL NOT NULL,
   coste INTEGER NOT NULL DEFAULT 0   -- coste por unidad en céntimos
 );
+-- Unidades de cada línea ya enviadas a cada impresora de comanda (para enviar solo lo nuevo).
+CREATE TABLE IF NOT EXISTS linea_envios (
+  id INTEGER PRIMARY KEY,
+  linea_id INTEGER NOT NULL,
+  impresora_id INTEGER NOT NULL,
+  unidades REAL NOT NULL,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS linea_envios_linea ON linea_envios (linea_id);
+-- Objetos de decoración del plano de una zona: separadores, plantas, barra, columnas.
+CREATE TABLE IF NOT EXISTS zona_objetos (
+  id INTEGER PRIMARY KEY,
+  zona_id INTEGER NOT NULL REFERENCES zonas(id) ON DELETE CASCADE,
+  tipo TEXT NOT NULL,
+  px REAL NOT NULL DEFAULT 0,
+  py REAL NOT NULL DEFAULT 0,
+  ancho REAL NOT NULL DEFAULT 100,
+  alto REAL NOT NULL DEFAULT 20
+);
 CREATE TABLE IF NOT EXISTS stock_movimientos (
   id INTEGER PRIMARY KEY,
   fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -419,6 +438,25 @@ function migrar(db: DB) {
   anadirColumna(db, 'articulos', 'stock_minimo', 'REAL NOT NULL DEFAULT 0');
   anadirColumna(db, 'articulos', 'coste', 'INTEGER NOT NULL DEFAULT 0');
   anadirColumna(db, 'articulos', 'codigo_barras', "TEXT NOT NULL DEFAULT ''");
+  // Venta por peso, impresoras de comanda (familia y artículo) e invitaciones.
+  anadirColumna(db, 'articulos', 'por_peso', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'articulos', 'impresoras', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'familias', 'impresoras', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'lineas', 'por_peso', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'lineas', 'invitacion', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'lineas', 'precio_original', 'INTEGER');
+  anadirColumna(db, 'ticket_lineas', 'por_peso', 'INTEGER NOT NULL DEFAULT 0');
+  anadirColumna(db, 'ticket_lineas', 'invitacion', 'INTEGER NOT NULL DEFAULT 0');
+  // Plano de las zonas: color de fondo y mesas con forma, plazas, posición y tamaño (en un lienzo de 1000 de ancho).
+  anadirColumna(db, 'impresoras', 'envio', "TEXT NOT NULL DEFAULT 'auto'");
+  anadirColumna(db, 'zonas', 'color_fondo', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'mesas', 'forma', "TEXT NOT NULL DEFAULT 'cuadrada'");
+  anadirColumna(db, 'mesas', 'plazas', 'INTEGER NOT NULL DEFAULT 4');
+  anadirColumna(db, 'mesas', 'px', 'REAL');
+  anadirColumna(db, 'mesas', 'py', 'REAL');
+  anadirColumna(db, 'mesas', 'ancho', 'REAL NOT NULL DEFAULT 110');
+  anadirColumna(db, 'mesas', 'alto', 'REAL NOT NULL DEFAULT 110');
+  anadirColumna(db, 'mesas', 'activa', 'INTEGER NOT NULL DEFAULT 1');
   const unaVez = (nombre: string, fn: () => void) => {
     if (db.prepare('SELECT 1 FROM migraciones WHERE nombre = ?').get(nombre)) return;
     fn();
@@ -472,6 +510,38 @@ function migrar(db: DB) {
     unaVez('configuracion_en_menu', () => {
       db.prepare("DELETE FROM botones WHERE accion = 'configuracion'").run();
     });
+    // Botonera: Nombre y Comensales ya se piden al guardar la cuenta y al abrir la mesa (quedan ocultos, se pueden activar).
+    // Traspasar y Dividir van detrás de Mesas; Invitación al final.
+    unaVez('botones_traspasar_dividir', () => {
+      db.prepare("UPDATE botones SET visible = 0 WHERE accion IN ('nombre', 'comensales')").run();
+      const m = db.prepare("SELECT orden FROM botones WHERE accion = 'mesas'").get() as { orden: number } | undefined;
+      const base = m?.orden ?? (db.prepare('SELECT COALESCE(MAX(orden), 0) AS o FROM botones').get() as { o: number }).o;
+      db.prepare('UPDATE botones SET orden = orden + 2 WHERE orden > ?').run(base);
+      const ins = db.prepare('INSERT INTO botones (accion, texto, color, orden, visible) VALUES (?, ?, ?, ?, 1)');
+      if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'traspasar'").get()) ins.run('traspasar', 'Traspasar mesa', '', base + 1);
+      if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'dividir'").get()) ins.run('dividir', 'Dividir cuenta', '', base + 2);
+      const fin = (db.prepare('SELECT COALESCE(MAX(orden), 0) + 1 AS o FROM botones').get() as { o: number }).o;
+      if (!db.prepare("SELECT 1 FROM botones WHERE accion = 'invitacion'").get()) ins.run('invitacion', 'Invitación', '#2a9d8f', fin);
+    });
+    // Las mesas del antiguo cuadro (columna/fila) pasan al plano.
+    unaVez('plano_mesas', () => {
+      const mesas = db.prepare('SELECT * FROM mesas WHERE px IS NULL').all() as { id: number; zona_id: number; x: number; y: number }[];
+      const cols = new Map<number, number>();
+      for (const m of mesas) cols.set(m.zona_id, Math.max(cols.get(m.zona_id) ?? 1, m.x + 1));
+      const upd = db.prepare('UPDATE mesas SET px = ?, py = ?, ancho = ?, alto = ? WHERE id = ?');
+      for (const m of mesas) {
+        const paso = Math.min(160, 940 / (cols.get(m.zona_id) ?? 1));
+        const t = Math.round(paso * 0.7);
+        upd.run(Math.round(30 + m.x * paso), Math.round(30 + m.y * paso), t, t, m.id);
+      }
+    });
+    // Quien ya podía entrar en configuración (encargado) también puede invitar.
+    unaVez('permiso_invitar', () => {
+      for (const o of db.prepare('SELECT id, permisos FROM operarios').all() as { id: number; permisos: string }[]) {
+        const p = String(o.permisos).split(',').filter(Boolean);
+        if (p.includes('configuracion') && !p.includes('invitar')) db.prepare('UPDATE operarios SET permisos = ? WHERE id = ?').run([...p, 'invitar'].join(','), o.id);
+      }
+    });
     unaVez('boton_cliente', () => {
       if (db.prepare("SELECT 1 FROM botones WHERE accion = 'cliente'").get()) return;
       const o = (db.prepare('SELECT COALESCE(MAX(orden), 0) + 1 AS o FROM botones').get() as { o: number }).o;
@@ -517,6 +587,9 @@ export const ACCIONES: Record<string, string> = {
   marchar: 'Marchar cocina',
   comanda: 'Ver comanda por orden de plato',
   cliente: 'Cliente de la cuenta (datos fiscales en el ticket)',
+  traspasar: 'Traspasar mesa (todo o por artículos)',
+  dividir: 'Dividir cuenta',
+  invitacion: 'Invitación (con permiso)',
 };
 
 // Permisos que se pueden dar a cada operario (se aplican en los puestos con permisos activados).
@@ -527,6 +600,7 @@ export const PERMISOS: Record<string, string> = {
   anular_ticket: 'Anular tickets',
   cierre_caja: 'Cierre de caja',
   ver_cuadre: 'Ver el cuadre de caja (cierre ciego)',
+  invitar: 'Invitar (artículos a 0 €)',
   configuracion: 'Entrar en configuración e informes',
 };
 

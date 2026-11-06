@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { AddressInfo } from 'node:net';
+import { createServer, type AddressInfo } from 'node:net';
 import { openDb } from '../server/db.ts';
 import { crearServidor } from '../server/app.ts';
 import { calcularHuella, desgloseIva } from '../server/ventas.ts';
@@ -679,4 +679,193 @@ test('correo: envía el ticket por SMTP con la configuración del puesto (servid
     assert.match(cuerpo, /Factura simplificada/);
     assert.match(cuerpo, /Gracias/);
   } finally { await cerrar(); smtp.close(); }
+});
+
+test('botonera: nombre y comensales ocultos, traspasar y dividir detrás de mesas, invitación', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const b = (await api('GET', '/inicio')).data.botones;
+    const de = (a: string) => b.find((x: any) => x.accion === a);
+    assert.equal(de('nombre').visible, 0);
+    assert.equal(de('comensales').visible, 0);
+    assert.equal(de('traspasar').orden, de('mesas').orden + 1);
+    assert.equal(de('dividir').orden, de('mesas').orden + 2);
+    assert.ok(de('invitacion'));
+  } finally { await cerrar(); }
+});
+
+test('traspasar: toda la cuenta a mesa libre, a mesa ocupada (se juntan) y por unidades; dividir en cuenta nueva', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const zona = ini.zonas.find((z: any) => z.tipo === 'mesas');
+    const [m1, m2, m3] = ini.mesas.filter((m: any) => m.zona_id === zona.id);
+    const [a1, a2] = ini.articulos;
+    const c1 = (await api('POST', '/cuentas', { zona_id: zona.id, mesa_id: m1.id, comensales: 2 })).data;
+    await api('POST', `/cuentas/${c1.id}/lineas`, { articulo_id: a1.id, unidades: 3 });
+    // Toda la cuenta a una mesa libre: es la misma cuenta en otra mesa.
+    let r = (await api('POST', `/cuentas/${c1.id}/traspasar`, { mesa_id: m2.id })).data;
+    assert.equal(r.origen, null);
+    assert.equal(r.destino.id, c1.id);
+    assert.equal(r.destino.mesa_id, m2.id);
+    // A una mesa ocupada: se juntan y la de origen se cierra.
+    const c3 = (await api('POST', '/cuentas', { zona_id: zona.id, mesa_id: m3.id, comensales: 1 })).data;
+    await api('POST', `/cuentas/${c3.id}/lineas`, { articulo_id: a2.id });
+    r = (await api('POST', `/cuentas/${c3.id}/traspasar`, { mesa_id: m2.id })).data;
+    assert.equal(r.destino.id, c1.id);
+    assert.equal(r.destino.lineas.length, 2);
+    assert.equal(r.destino.comensales, 3);
+    assert.equal((await api('GET', `/cuentas/${c3.id}`)).data.estado, 'vacia');
+    // Por unidades: 1 de las 3 a la mesa 1 (libre) abre cuenta nueva allí.
+    const l = r.destino.lineas.find((x: any) => x.articulo_id === a1.id);
+    r = (await api('POST', `/cuentas/${c1.id}/traspasar`, { mesa_id: m1.id, lineas: [{ id: l.id, unidades: 1 }] })).data;
+    assert.equal(r.origen.lineas.find((x: any) => x.articulo_id === a1.id).unidades, 2);
+    assert.equal(r.destino.mesa_id, m1.id);
+    assert.equal(r.destino.lineas[0].unidades, 1);
+    assert.equal((await api('POST', `/cuentas/${c1.id}/traspasar`, { mesa_id: m1.id, lineas: [{ id: l.id, unidades: 5 }] })).status, 400);
+    // Dividir: parte a una cuenta nueva sin mesa, se cobra y la original sigue.
+    const parte = (await api('POST', `/cuentas/${c1.id}/traspasar`, { nueva: true, nombre: 'Parte 1', lineas: [{ id: l.id, unidades: 1 }] })).data;
+    assert.equal(parte.destino.mesa_id, null);
+    assert.equal(parte.destino.total, a1.precio);
+    const ef = ini.formas_cobro.find((f: any) => f.tipo === 'efectivo');
+    assert.equal((await api('POST', `/cuentas/${parte.destino.id}/cobrar`, { forma_cobro_id: ef.id })).status, 200);
+    assert.equal((await api('GET', `/cuentas/${c1.id}`)).data.estado, 'abierta');
+  } finally { await cerrar(); }
+});
+
+test('invitación: a 0 € con "invitación" en la línea y el ticket; con permiso; se puede quitar', async () => {
+  const { api, db, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const a = ini.articulos.find((x: any) => x.precio > 0);
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    const l = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: a.id, unidades: 3 })).data.lineas[0];
+    let cu = (await api('POST', `/lineas/${l.id}/invitar`, { unidades: 1 })).data;
+    assert.equal(cu.lineas.length, 2);
+    assert.equal(cu.total, a.precio * 2);
+    const inv = cu.lineas.find((x: any) => x.invitacion);
+    assert.equal(inv.precio, 0);
+    assert.equal(inv.precio_original, a.precio);
+    cu = (await api('POST', `/lineas/${inv.id}/invitar`, { quitar: true })).data;
+    assert.equal(cu.total, a.precio * 3);
+    await api('POST', `/lineas/${inv.id}/invitar`, {});
+    const ef = ini.formas_cobro.find((f: any) => f.tipo === 'efectivo');
+    const t = (await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: ef.id })).data;
+    assert.equal(t.lineas.filter((x: any) => x.invitacion).length, 1);
+    // Con permisos activados, quien no tiene "invitar" no puede.
+    const p = (await api('GET', '/gestion/puestos')).data[0];
+    await api('PUT', `/gestion/puestos/${p.id}`, { usar_permisos: true });
+    const op = (await api('POST', '/gestion/operarios', { nombre: 'Ane', permisos: 'cobrar' })).data;
+    const c2 = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    const l2 = (await api('POST', `/cuentas/${c2.id}/lineas`, { articulo_id: a.id })).data.lineas[0];
+    const r = await api('POST', `/lineas/${l2.id}/invitar`, {}, { 'x-puesto': String(p.id), 'x-operario': String(op.id) });
+    assert.equal(r.status, 403);
+    void db;
+  } finally { await cerrar(); }
+});
+
+test('peso e impresoras de comanda: manda el artículo sobre la familia', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const cocina = (await api('POST', '/gestion/impresoras', { nombre: 'Cocina', uso: 'cocina' })).data;
+    const bar = (await api('POST', '/gestion/impresoras', { nombre: 'Barra', uso: 'barra' })).data;
+    const fam = (await api('POST', '/gestion/familias', { nombre: 'Cafés', impresoras: `${bar.id}` })).data;
+    const cafe = (await api('POST', '/gestion/articulos', { nombre: 'Café', precio: 150, familia_id: fam.id })).data;
+    const tostada = (await api('POST', '/gestion/articulos', { nombre: 'Tostada', precio: 250, familia_id: fam.id, impresoras: `${cocina.id}` })).data;
+    const agua = (await api('POST', '/gestion/articulos', { nombre: 'Agua', precio: 100, familia_id: fam.id, impresoras: `ninguna,${cocina.id}` })).data;
+    assert.equal(agua.impresoras, 'ninguna');
+    const jamon = (await api('POST', '/gestion/articulos', { nombre: 'Jamón al corte', precio: 6000, familia_id: fam.id, por_peso: true })).data;
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    for (const a of [cafe, tostada, agua]) await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: a.id });
+    assert.equal((await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: jamon.id })).status, 400);
+    const cu = (await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: jamon.id, unidades: 0.2504 })).data;
+    const lj = cu.lineas.at(-1);
+    assert.equal(lj.unidades, 0.25);
+    assert.equal(lj.por_peso, 1);
+    assert.equal(cu.total, 150 + 250 + 100 + 1500);
+    const com = (await api('GET', `/cuentas/${c.id}/comanda`)).data;
+    const textos = (id: number) => com.por_impresora.find((i: any) => i.id === id)?.grupos.flatMap((g: any) => g.lineas.map((l: any) => l.texto)) ?? [];
+    assert.deepEqual(textos(bar.id).sort(), ['Café', 'Jamón al corte']);
+    assert.deepEqual(textos(cocina.id), ['Tostada']);
+    assert.deepEqual(com.sin_impresora.flatMap((g: any) => g.lineas.map((l: any) => l.texto)), ['Agua']);
+  } finally { await cerrar(); }
+});
+
+test('plano de zona: color, mesas con forma y tamaño, objetos; una mesa con ventas se oculta', async () => {
+  const { api, cerrar } = await arrancar();
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const zona = ini.zonas.find((z: any) => z.tipo === 'mesas');
+    const p = (await api('GET', `/zonas/${zona.id}/plano`)).data;
+    assert.ok(p.mesas.length > 0);
+    assert.ok(p.mesas.every((m: any) => m.px !== null));
+    const usada = p.mesas[0];
+    const c = (await api('POST', '/cuentas', { zona_id: zona.id, mesa_id: usada.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: ini.articulos[0].id });
+    const nuevo = { color_fondo: '#f3ead8', mesas: [...p.mesas.slice(1), { nombre: 'T10', forma: 'redonda', plazas: 6, px: 500, py: 300, ancho: 140, alto: 140 }],
+      objetos: [{ tipo: 'planta', px: 10, py: 10, ancho: 40, alto: 40 }, { tipo: 'separador', px: 400, py: 0, ancho: 16, alto: 300 }] };
+    assert.equal((await api('PUT', `/zonas/${zona.id}/plano`, nuevo)).status, 400); // la mesa quitada tiene cuenta abierta
+    const ef = ini.formas_cobro.find((f: any) => f.tipo === 'efectivo');
+    await api('POST', `/cuentas/${c.id}/cobrar`, { forma_cobro_id: ef.id });
+    const g = (await api('PUT', `/zonas/${zona.id}/plano`, nuevo)).data;
+    assert.equal(g.zona.color_fondo, '#f3ead8');
+    assert.equal(g.mesas.length, p.mesas.length);
+    assert.equal(g.mesas.find((m: any) => m.nombre === 'T10').forma, 'redonda');
+    assert.equal(g.objetos.length, 2);
+    const ini2 = (await api('GET', '/inicio')).data;
+    assert.ok(!ini2.mesas.some((m: any) => m.id === usada.id));
+    assert.equal(ini2.zona_objetos.length, 2);
+    assert.equal((await api('PUT', `/zonas/${zona.id}/plano`, { mesas: [{ nombre: 'A', forma: 'cuadrada' }, { nombre: 'a', forma: 'cuadrada' }] })).status, 400);
+  } finally { await cerrar(); }
+});
+
+test('comandas: al guardar sale solo lo nuevo en su impresora; manual solo con Enviar; reenviar como copia', async () => {
+  const { api, cerrar } = await arrancar();
+  const recibido: Record<string, string[]> = {};
+  const srv = createServer(s => { let d = ''; s.setEncoding('latin1'); s.on('data', x => d += x); s.on('end', () => { (recibido[String((srv.address() as AddressInfo).port)] ??= []).push(d); }); });
+  await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
+  const puerto = (srv.address() as AddressInfo).port;
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const cocina = (await api('POST', '/gestion/impresoras', { nombre: 'Cocina', uso: 'cocina', ip: '127.0.0.1', puerto })).data;
+    const bar = (await api('POST', '/gestion/impresoras', { nombre: 'Barra', uso: 'barra', ip: '127.0.0.1', puerto, envio: 'manual' })).data;
+    const fam = (await api('POST', '/gestion/familias', { nombre: 'Raciones', impresoras: `${cocina.id}` })).data;
+    const rabas = (await api('POST', '/gestion/articulos', { nombre: 'Rabas', precio: 1200, familia_id: fam.id })).data;
+    const cana = (await api('POST', '/gestion/articulos', { nombre: 'Caña', precio: 250, familia_id: fam.id, impresoras: `${bar.id}` })).data;
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: rabas.id, unidades: 2 });
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: cana.id });
+    let r = (await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'auto' })).data;
+    assert.deepEqual(r.enviadas.map((x: any) => [x.impresora, x.ok]), [['Cocina', true]]);
+    await new Promise(res => setTimeout(res, 50));
+    assert.equal(recibido[puerto].length, 1);
+    assert.match(recibido[puerto][0], /2 x Rabas/);
+    // Otra vez en automático: no hay nada nuevo para cocina.
+    r = (await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'auto' })).data;
+    assert.equal(r.enviadas.length, 0);
+    // Una ración más: solo sale la nueva.
+    const cu = (await api('GET', `/cuentas/${c.id}`)).data;
+    await api('PATCH', `/lineas/${cu.lineas[0].id}`, { unidades: 3 });
+    await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'auto' });
+    // Enviar comanda: sale la barra (manual).
+    r = (await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'enviar' })).data;
+    assert.deepEqual(r.enviadas.map((x: any) => x.impresora), ['Barra']);
+    r = (await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'reenviar' })).data;
+    assert.equal(r.enviadas.length, 2);
+    await new Promise(res => setTimeout(res, 80));
+    const todo = recibido[puerto];
+    assert.match(todo[1], /1 x Rabas/);
+    assert.match(todo[2], /1 x Ca\xa4a/);
+    assert.ok(todo.slice(3).some(t => /REENVIO/.test(t) && /3 x Rabas/.test(t)));
+    // Impresora apagada: se avisa y queda pendiente.
+    await api('PUT', `/gestion/impresoras/${cocina.id}`, { puerto: 1 });
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: rabas.id });
+    r = (await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'auto' })).data;
+    assert.equal(r.enviadas[0].ok, false);
+    assert.equal((await api('GET', `/cuentas/${c.id}/comanda/pendiente`)).data[0].lineas.length, 1);
+  } finally { await cerrar(); srv.close(); }
 });

@@ -12,13 +12,14 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   familias: {
     nombre: { tipo: 'texto', obligatorio: true }, color: { tipo: 'texto' }, orden: { tipo: 'entero' },
     padre_id: { tipo: 'ref' }, departamento_id: { tipo: 'ref' },
-    imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' },
+    imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' }, impresoras: { tipo: 'texto' },
   },
   articulos: {
     nombre: { tipo: 'texto', obligatorio: true }, precio: { tipo: 'entero' }, iva: { tipo: 'decimal' },
     familia_id: { tipo: 'ref' }, grupo_cocina: { tipo: 'entero' }, orden_plato_id: { tipo: 'ref' }, orden: { tipo: 'entero' }, activo: { tipo: 'bool' },
     imagen: { tipo: 'imagen' }, color_fondo: { tipo: 'color' }, color_texto: { tipo: 'color' }, alergenos: { tipo: 'alergenos' },
     controlar_stock: { tipo: 'bool' }, stock_minimo: { tipo: 'decimal' }, coste: { tipo: 'entero' }, codigo_barras: { tipo: 'texto' },
+    por_peso: { tipo: 'bool' }, impresoras: { tipo: 'texto' },
   },
   clientes: {
     nombre: { tipo: 'texto', obligatorio: true }, apellidos: { tipo: 'texto' }, apodo: { tipo: 'texto' }, nif: { tipo: 'texto' },
@@ -30,8 +31,11 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
     nombre: { tipo: 'texto', obligatorio: true }, nif: { tipo: 'texto' }, telefono: { tipo: 'texto' }, email: { tipo: 'texto' },
     direccion: { tipo: 'texto' }, contacto: { tipo: 'texto' }, observaciones: { tipo: 'texto' },
   },
-  zonas: { nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['barra', 'mesas'] }, orden: { tipo: 'entero' } },
-  mesas: { zona_id: { tipo: 'ref', obligatorio: true }, nombre: { tipo: 'texto', obligatorio: true }, x: { tipo: 'entero' }, y: { tipo: 'entero' } },
+  zonas: { nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['barra', 'mesas'] }, orden: { tipo: 'entero' }, color_fondo: { tipo: 'color' } },
+  mesas: {
+    zona_id: { tipo: 'ref', obligatorio: true }, nombre: { tipo: 'texto', obligatorio: true }, x: { tipo: 'entero' }, y: { tipo: 'entero' },
+    forma: { tipo: 'texto', valores: ['cuadrada', 'rectangular', 'redonda'] }, plazas: { tipo: 'entero' },
+  },
   formas_cobro: {
     nombre: { tipo: 'texto', obligatorio: true }, tipo: { tipo: 'texto', valores: ['efectivo', 'tarjeta', 'pendiente', 'otro'] },
     activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
@@ -58,6 +62,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   impresoras: {
     nombre: { tipo: 'texto', obligatorio: true }, ip: { tipo: 'texto' }, puerto: { tipo: 'entero' },
     uso: { tipo: 'texto', valores: ['tickets', 'cocina', 'barra', 'otro'] }, departamento_id: { tipo: 'ref' },
+    envio: { tipo: 'texto', valores: ['auto', 'manual'] },
     activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
   },
   conceptos_pago: { nombre: { tipo: 'texto', obligatorio: true }, orden: { tipo: 'entero' } },
@@ -147,7 +152,7 @@ export const CLAVE_OCULTA = '••••••';
 export function listar(db: DB, tabla: string) {
   comprobarTabla(tabla);
   const orden = 'orden' in TABLAS[tabla] ? 'orden, id' : tabla === 'clientes' || tabla === 'proveedores' ? 'nombre COLLATE NOCASE' : 'id';
-  const filas = db.prepare(`SELECT * FROM ${tabla} ORDER BY ${orden}`).all() as Record<string, any>[];
+  const filas = db.prepare(`SELECT * FROM ${tabla} ${tabla === 'mesas' ? 'WHERE activa = 1' : ''} ORDER BY ${orden}`).all() as Record<string, any>[];
   // La contraseña del correo no sale nunca del servidor.
   if (tabla === 'puestos') for (const f of filas) f.smtp_clave = f.smtp_clave ? CLAVE_OCULTA : '';
   return filas;
@@ -160,9 +165,17 @@ function rfidLibre(db: DB, tabla: string, v: Record<string, unknown>, id: number
   if (otro) throw new ErrorTPV(`Esa pulsera ya es de ${otro.nombre}`);
 }
 
+// Impresoras de comanda: lista de ids. En un artículo, vacío = las de su familia y 'ninguna' = no se imprime.
+function normalizarImpresoras(v: Record<string, unknown>) {
+  if (typeof v.impresoras !== 'string') return;
+  const p = v.impresoras.split(',').map(x => x.trim()).filter(Boolean);
+  v.impresoras = p.includes('ninguna') ? 'ninguna' : [...new Set(p.filter(x => /^\d+$/.test(x)))].join(',');
+}
+
 export function crear(db: DB, tabla: string, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, true);
+  normalizarImpresoras(v);
   rfidLibre(db, tabla, v, null);
   const cols = Object.keys(v);
   const r = db.prepare(`INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
@@ -184,6 +197,7 @@ function evitarCiclo(db: DB, id: number, padreId: number) {
 export function actualizar(db: DB, tabla: string, id: number, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, false);
+  normalizarImpresoras(v);
   if (tabla === 'puestos' && v.smtp_clave === CLAVE_OCULTA) delete v.smtp_clave;
   rfidLibre(db, tabla, v, id);
   if (tabla === 'familias' && v.padre_id != null) evitarCiclo(db, id, Number(v.padre_id));
@@ -243,6 +257,11 @@ export function borrar(db: DB, tabla: string, id: number) {
       db.prepare('UPDATE articulos SET activo = 0 WHERE id = ?').run(id);
       return { desactivado: true };
     }
+  }
+  if (tabla === 'mesas' && db.prepare('SELECT 1 FROM cuentas WHERE mesa_id = ?').get(id)) {
+    if (db.prepare("SELECT 1 FROM cuentas WHERE mesa_id = ? AND estado = 'abierta'").get(id)) throw new ErrorTPV('La mesa tiene una cuenta abierta');
+    db.prepare('UPDATE mesas SET activa = 0 WHERE id = ?').run(id);
+    return { desactivado: true };
   }
   try {
     db.prepare(`DELETE FROM ${tabla} WHERE id = ?`).run(id);

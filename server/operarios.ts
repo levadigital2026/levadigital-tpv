@@ -37,6 +37,8 @@ export function permisoDe(metodo: string, ruta: string): string | null {
   if (metodo === 'DELETE' && /^\/api\/cuentas\/\d+\/lineas$/.test(ruta)) return 'borrar_todo';
   if (metodo === 'POST' && /^\/api\/tickets\/\d+\/anular$/.test(ruta)) return 'anular_ticket';
   if (metodo === 'POST' && ruta === '/api/caja/cierre') return 'cierre_caja';
+  if (metodo === 'POST' && /^\/api\/lineas\/\d+\/invitar$/.test(ruta)) return 'invitar';
+  if (metodo === 'PUT' && /^\/api\/zonas\/\d+\/plano$/.test(ruta)) return 'configuracion';
   if (metodo !== 'GET' && /^\/api\/(gestion|empresa|aspecto|imagenes|carta-demo|licencia|correo)(\/|$)/.test(ruta)) return 'configuracion';
   if (metodo === 'GET' && /^\/api\/(informes|registro)(\/|$)/.test(ruta)) return 'configuracion';
   return null;

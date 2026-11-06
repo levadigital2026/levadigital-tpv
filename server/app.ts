@@ -13,6 +13,8 @@ import { PERMISOS } from './db.ts';
 import * as cl from './clientes.ts';
 import * as st from './stocks.ts';
 import * as correo from './correo.ts';
+import * as salas from './salas.ts';
+import * as comandas from './comandas.ts';
 import { estadoLicencia, activarLicencia, comprobarModulo } from './licencia.ts';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
@@ -44,6 +46,7 @@ ruta('GET', '/api/inicio', async ({ db }) => ({
   articulos: g.listar(db, 'articulos'),
   zonas: g.listar(db, 'zonas'),
   mesas: g.listar(db, 'mesas'),
+  zona_objetos: db.prepare('SELECT * FROM zona_objetos ORDER BY id').all(),
   formas_cobro: g.listar(db, 'formas_cobro'),
   botones: g.listar(db, 'botones'),
   impresoras: g.listar(db, 'impresoras'),
@@ -90,11 +93,21 @@ ruta('DELETE', '/api/cuentas/:id/lineas', ({ db, params }) => v.borrarTodasLinea
 ruta('POST', '/api/cuentas/:id/lineas', ({ db, params, body }) => v.anadirLinea(db, num(params[0]), body));
 ruta('POST', '/api/cuentas/:id/orden_plato', ({ db, params, body }) => v.asignarOrdenPlato(db, num(params[0]), body));
 ruta('GET', '/api/cuentas/:id/comanda', ({ db, params }) => v.comandaCuenta(db, num(params[0])));
-ruta('POST', '/api/cuentas/:id/marchar', ({ db, params, body }) => v.marchar(db, num(params[0]), body));
+ruta('POST', '/api/cuentas/:id/marchar', async ({ db, params, body }) => {
+  const r: any = v.marchar(db, num(params[0]), body);
+  r.impresoras = await comandas.imprimirMarcha(db, num(params[0]), Number(body?.orden_plato_id), r.texto);
+  return r;
+});
+ruta('GET', '/api/cuentas/:id/comanda/pendiente', ({ db, params }) => comandas.pendienteComanda(db, num(params[0])));
+ruta('POST', '/api/cuentas/:id/comanda/enviar', ({ db, params, body }) => comandas.enviarComanda(db, num(params[0]), body?.modo));
 ruta('GET', '/api/cocina/marchas', ({ db }) => db.prepare('SELECT * FROM marchas ORDER BY id DESC LIMIT 50').all());
 ruta('POST', '/api/operarios/entrar', ({ db, body }) => o.entrar(db, body));
 ruta('GET', '/api/informes/empleados', ({ db, url }) => o.informeEmpleados(db, url.searchParams.get('desde'), url.searchParams.get('hasta'), url.searchParams.get('operario')));
 ruta('POST', '/api/cuentas/:id/cobrar', ({ db, params, body }) => v.cobrarCuenta(db, num(params[0]), body));
+ruta('GET', '/api/zonas/:id/plano', ({ db, params }) => salas.getPlano(db, num(params[0])));
+ruta('PUT', '/api/zonas/:id/plano', ({ db, params, body }) => salas.guardarPlano(db, num(params[0]), body));
+ruta('POST', '/api/cuentas/:id/traspasar', ({ db, params, body }) => v.traspasar(db, num(params[0]), body));
+ruta('POST', '/api/lineas/:id/invitar', ({ db, params, body }) => v.invitar(db, num(params[0]), body));
 ruta('PATCH', '/api/lineas/:id', ({ db, params, body }) => v.modificarLinea(db, num(params[0]), body));
 ruta('DELETE', '/api/lineas/:id', ({ db, params }) => v.borrarLinea(db, num(params[0])));
 

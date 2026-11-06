@@ -78,11 +78,12 @@ export function anadirLinea(db: DB, cuentaId: number, datos: { articulo_id: numb
   cuentaAbierta(db, cuentaId);
   const a = db.prepare('SELECT * FROM articulos WHERE id = ? AND activo = 1').get(datos.articulo_id) as Row | undefined;
   if (!a) throw new ErrorTPV('El artículo no existe');
-  const unidades = datos.unidades ?? 1;
-  if (!(unidades > 0)) throw new ErrorTPV('Las unidades deben ser mayores que 0');
-  db.prepare(`INSERT INTO lineas (cuenta_id, articulo_id, descripcion, unidades, precio, iva, grupo_cocina, orden_plato_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(cuentaId, a.id, a.nombre, unidades, a.precio, a.iva, a.grupo_cocina, a.orden_plato_id ?? null);
+  // Un artículo por peso lleva los kilos en las unidades (precio por kg).
+  const unidades = a.por_peso ? Math.round(Number(datos.unidades) * 1000) / 1000 : (datos.unidades ?? 1);
+  if (!(unidades > 0)) throw new ErrorTPV(a.por_peso ? 'Indica el peso' : 'Las unidades deben ser mayores que 0');
+  db.prepare(`INSERT INTO lineas (cuenta_id, articulo_id, descripcion, unidades, precio, iva, grupo_cocina, orden_plato_id, por_peso)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(cuentaId, a.id, a.nombre, unidades, a.precio, a.iva, a.grupo_cocina, a.orden_plato_id ?? null, a.por_peso ? 1 : 0);
   return getCuenta(db, cuentaId);
 }
 
@@ -96,6 +97,7 @@ export function modificarLinea(db: DB, lineaId: number, datos: { unidades?: numb
   }
   if (datos.precio !== undefined) {
     if (!Number.isInteger(datos.precio) || datos.precio < 0) throw new ErrorTPV('Precio no válido');
+    if (l.invitacion) throw new ErrorTPV('Es una invitación: quita la invitación para cambiar el precio');
     db.prepare('UPDATE lineas SET precio = ? WHERE id = ?').run(datos.precio, lineaId);
   }
   if (datos.detalle !== undefined) {
@@ -173,7 +175,7 @@ export function informeBorrados(db: DB, desde?: string | null, hasta?: string | 
 }
 
 // Nombre de la cuenta como se dice en cocina: "Mesa 1 de Comedor" o "Barra · barba".
-function nombreParaCocina(db: DB, cuentaId: number) {
+export function nombreParaCocina(db: DB, cuentaId: number) {
   const c = db.prepare(`SELECT c.nombre, z.nombre AS zona, m.nombre AS mesa FROM cuentas c JOIN zonas z ON z.id = c.zona_id
                         LEFT JOIN mesas m ON m.id = c.mesa_id WHERE c.id = ?`).get(cuentaId) as Row;
   if (c.mesa) return `${/^mesa\b/i.test(c.mesa) ? c.mesa : 'Mesa ' + c.mesa} de ${c.zona}`;
@@ -203,9 +205,14 @@ export function comandaCuenta(db: DB, cuentaId: number) {
   for (const l of lineas) {
     let g = grupos.find(x => x.orden_plato_id === (l.orden_plato_id ?? null));
     if (!g) grupos.push(g = { orden_plato_id: l.orden_plato_id ?? null, nombre: l.orden_plato ?? 'Sin orden', lineas: [] });
-    g.lineas.push({ unidades: l.unidades, texto: l.detalle || l.descripcion });
+    g.lineas.push({ unidades: l.unidades, texto: l.detalle || l.descripcion, impresoras: impresorasDe(db, l.articulo_id) } as any);
   }
-  return { cuenta: nombreParaCocina(db, cuentaId), grupos };
+  // La misma comanda repartida por impresora (cada impresora solo recibe lo suyo).
+  const imps = db.prepare('SELECT id, nombre FROM impresoras WHERE activa = 1 ORDER BY orden, id').all() as Row[];
+  const por_impresora = imps.map(i => ({ id: i.id, nombre: i.nombre,
+    grupos: grupos.map(g => ({ ...g, lineas: g.lineas.filter((l: any) => l.impresoras.includes(i.id)) })).filter(g => g.lineas.length) })).filter(i => i.grupos.length);
+  const sin = grupos.map(g => ({ ...g, lineas: g.lineas.filter((l: any) => !l.impresoras.length) })).filter(g => g.lineas.length);
+  return { cuenta: nombreParaCocina(db, cuentaId), grupos, por_impresora, sin_impresora: sin };
 }
 
 // "Marchar": avisa a cocina de que empiece un orden de plato de una mesa.
@@ -219,6 +226,116 @@ export function marchar(db: DB, cuentaId: number, datos: { orden_plato_id?: numb
   db.prepare('INSERT INTO marchas (cuenta_id, cuenta, orden_plato_id, orden_plato, texto, operario_id, operario) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(cuentaId, cuenta, o.id, o.nombre, texto, op?.id ?? null, op?.nombre ?? '');
   return { texto };
+}
+
+// Traspasar: lleva la cuenta (o solo algunas líneas/unidades) a otra mesa, a otra cuenta abierta o a una cuenta nueva.
+// Si la mesa de destino ya tiene cuenta abierta, se juntan. Dividir cuenta usa lo mismo con { nueva: true }.
+export function traspasar(db: DB, origenId: number, datos: {
+  zona_id?: number; mesa_id?: number | null; cuenta_id?: number; nueva?: boolean; nombre?: string; lineas?: { id: number; unidades?: number }[];
+}) {
+  return tx(db, () => {
+    const origen = cuentaAbierta(db, origenId);
+    const todas = db.prepare('SELECT * FROM lineas WHERE cuenta_id = ? ORDER BY id').all(origenId) as Row[];
+    const parcial = Array.isArray(datos.lineas) && datos.lineas.length > 0;
+    let destinoId: number | null = null;
+    if (datos.cuenta_id) {
+      destinoId = cuentaAbierta(db, Number(datos.cuenta_id)).id;
+    } else if (datos.mesa_id) {
+      const mesa = db.prepare('SELECT * FROM mesas WHERE id = ? AND activa = 1').get(Number(datos.mesa_id)) as Row | undefined;
+      if (!mesa) throw new ErrorTPV('La mesa de destino no existe');
+      const abierta = db.prepare("SELECT id FROM cuentas WHERE mesa_id = ? AND estado = 'abierta'").get(mesa.id) as Row | undefined;
+      if (abierta) destinoId = abierta.id;
+      else if (!parcial) {
+        // Toda la cuenta a una mesa libre: la cuenta se cambia de sitio.
+        db.prepare('UPDATE cuentas SET zona_id = ?, mesa_id = ? WHERE id = ?').run(mesa.zona_id, mesa.id, origenId);
+        return { origen: null, destino: getCuenta(db, origenId) };
+      } else {
+        destinoId = Number(db.prepare('INSERT INTO cuentas (zona_id, mesa_id, comensales, operario_id, cliente_id) VALUES (?, ?, 0, ?, ?)')
+          .run(mesa.zona_id, mesa.id, contexto.operario?.id ?? null, origen.cliente_id ?? null).lastInsertRowid);
+      }
+    } else if (datos.nueva || datos.zona_id) {
+      const zonaId = Number(datos.zona_id ?? origen.zona_id);
+      if (!db.prepare('SELECT 1 FROM zonas WHERE id = ?').get(zonaId)) throw new ErrorTPV('La zona no existe');
+      destinoId = Number(db.prepare('INSERT INTO cuentas (zona_id, mesa_id, nombre, operario_id, cliente_id) VALUES (?, NULL, ?, ?, ?)')
+        .run(zonaId, String(datos.nombre ?? '').trim(), contexto.operario?.id ?? null, origen.cliente_id ?? null).lastInsertRowid);
+    } else throw new ErrorTPV('Elige a dónde se traspasa');
+    if (destinoId === origenId) throw new ErrorTPV('El destino es la misma cuenta');
+    const mover = parcial ? datos.lineas! : todas.map(l => ({ id: l.id, unidades: l.unidades }));
+    const pasar = db.prepare('UPDATE lineas SET cuenta_id = ? WHERE id = ?');
+    const restar = db.prepare('UPDATE lineas SET unidades = ? WHERE id = ?');
+    const copiar = db.prepare(`INSERT INTO lineas (cuenta_id, articulo_id, descripcion, unidades, precio, iva, detalle, grupo_cocina, orden_plato_id, por_peso, invitacion, precio_original, creada_en)
+      SELECT ?, articulo_id, descripcion, ?, precio, iva, detalle, grupo_cocina, orden_plato_id, por_peso, invitacion, precio_original, creada_en FROM lineas WHERE id = ?`);
+    let movidas = 0;
+    for (const m of mover) {
+      const l = todas.find(x => x.id === Number(m.id));
+      if (!l) throw new ErrorTPV('Hay una línea que no es de esta cuenta');
+      const u = m.unidades === undefined ? l.unidades : Math.round(Number(m.unidades) * 1000) / 1000;
+      if (!(u > 0)) continue;
+      if (u > l.unidades + 1e-9) throw new ErrorTPV(`No hay tantas unidades de ${l.descripcion}`);
+      if (u >= l.unidades - 1e-9) pasar.run(destinoId, l.id);
+      else { restar.run(Math.round((l.unidades - u) * 1000) / 1000, l.id); copiarEnvios(db, l.id, Number(copiar.run(destinoId, u, l.id).lastInsertRowid), u); }
+      movidas++;
+    }
+    if (!movidas) throw new ErrorTPV('Elige qué artículos se traspasan');
+    // La cuenta de origen sin líneas se cierra (y pasa sus comensales si se ha juntado con otra mesa).
+    const quedan = (db.prepare('SELECT COUNT(*) AS n FROM lineas WHERE cuenta_id = ?').get(origenId) as Row).n;
+    if (!quedan) {
+      if (origen.comensales && !parcial) db.prepare('UPDATE cuentas SET comensales = comensales + ? WHERE id = ?').run(origen.comensales, destinoId);
+      db.prepare("UPDATE cuentas SET estado = 'vacia', cerrada_en = datetime('now') WHERE id = ?").run(origenId);
+    }
+    return { origen: quedan ? getCuenta(db, origenId) : null, destino: getCuenta(db, destinoId!) };
+  });
+}
+
+// Al partir una línea, la parte nueva ya cuenta como enviada a cocina (no se vuelve a imprimir).
+function copiarEnvios(db: DB, de: number, a: number, unidades: number) {
+  const env = db.prepare('SELECT impresora_id, SUM(unidades) AS u FROM linea_envios WHERE linea_id = ? GROUP BY impresora_id').all(de) as Row[];
+  for (const e of env) db.prepare('INSERT INTO linea_envios (linea_id, impresora_id, unidades) VALUES (?, ?, ?)').run(a, e.impresora_id, Math.min(e.u, unidades));
+}
+
+// Invitación: la línea (o parte de sus unidades) pasa a 0 € y en la cuenta y el ticket sale "Invitación".
+export function invitar(db: DB, lineaId: number, datos: { unidades?: number; quitar?: boolean }) {
+  const l = db.prepare('SELECT * FROM lineas WHERE id = ?').get(lineaId) as Row | undefined;
+  if (!l) throw new ErrorTPV('La línea no existe', 404);
+  cuentaAbierta(db, l.cuenta_id);
+  return tx(db, () => {
+    if (datos.quitar) {
+      if (!l.invitacion) throw new ErrorTPV('Esta línea no es una invitación');
+      db.prepare('UPDATE lineas SET invitacion = 0, precio = COALESCE(precio_original, precio), precio_original = NULL WHERE id = ?').run(lineaId);
+      return getCuenta(db, l.cuenta_id);
+    }
+    if (l.invitacion) throw new ErrorTPV('Esta línea ya es una invitación');
+    const u = datos.unidades === undefined ? l.unidades : Math.round(Number(datos.unidades) * 1000) / 1000;
+    if (!(u > 0) || u > l.unidades + 1e-9) throw new ErrorTPV('Unidades no válidas');
+    let id = lineaId;
+    if (u < l.unidades - 1e-9) {
+      db.prepare('UPDATE lineas SET unidades = ? WHERE id = ?').run(Math.round((l.unidades - u) * 1000) / 1000, lineaId);
+      id = Number(db.prepare(`INSERT INTO lineas (cuenta_id, articulo_id, descripcion, unidades, precio, iva, detalle, grupo_cocina, orden_plato_id, por_peso, creada_en)
+        SELECT cuenta_id, articulo_id, descripcion, ?, precio, iva, detalle, grupo_cocina, orden_plato_id, por_peso, creada_en FROM lineas WHERE id = ?`).run(u, lineaId).lastInsertRowid);
+      copiarEnvios(db, lineaId, id, u);
+    }
+    db.prepare('UPDATE lineas SET invitacion = 1, precio_original = precio, precio = 0 WHERE id = ?').run(id);
+    return getCuenta(db, l.cuenta_id);
+  });
+}
+
+// Impresoras de comanda de un artículo: las suyas si las tiene (o ninguna), si no las de su familia
+// (o de la familia de arriba) y, si tampoco, las de cocina/barra del departamento de la familia.
+export function impresorasDe(db: DB, articuloId: number | null): number[] {
+  if (!articuloId) return [];
+  const a = db.prepare('SELECT impresoras, familia_id FROM articulos WHERE id = ?').get(articuloId) as Row | undefined;
+  if (!a) return [];
+  const lista = (s: string) => String(s).split(',').filter(x => /^\d+$/.test(x)).map(Number);
+  if (a.impresoras === 'ninguna') return [];
+  if (a.impresoras) return lista(a.impresoras);
+  let f = a.familia_id ? db.prepare('SELECT id, padre_id, impresoras, departamento_id FROM familias WHERE id = ?').get(a.familia_id) as Row | undefined : undefined;
+  const dep = f?.departamento_id;
+  for (let n = 0; f && n < 20; n++) {
+    if (f.impresoras) return lista(f.impresoras);
+    f = f.padre_id ? db.prepare('SELECT id, padre_id, impresoras, departamento_id FROM familias WHERE id = ?').get(f.padre_id) as Row | undefined : undefined;
+  }
+  if (!dep) return [];
+  return (db.prepare("SELECT id FROM impresoras WHERE activa = 1 AND uso <> 'tickets' AND departamento_id = ? ORDER BY orden, id").all(dep) as Row[]).map(r => r.id);
 }
 
 // Huella encadenada: cada ticket incluye la huella del anterior, así no se puede
@@ -250,7 +367,7 @@ export function datosFiscales(db: DB, clienteId: number | null | undefined) {
 
 function emitirTicket(db: DB, datos: {
   cuenta_id: number | null; total: number; pagos: Pago[]; serie?: string; cliente_id?: number | null;
-  anula_ticket_id?: number | null; lineas: { articulo_id: number | null; descripcion: string; unidades: number; precio: number; iva: number }[];
+  anula_ticket_id?: number | null; lineas: { articulo_id: number | null; descripcion: string; unidades: number; precio: number; iva: number; invitacion?: number; por_peso?: number }[];
 }) {
   const serie = datos.serie ?? serieDe(db, 'tickets');
   const ultimo = db.prepare('SELECT numero, huella FROM tickets WHERE serie = ? ORDER BY numero DESC LIMIT 1').get(serie) as Row | undefined;
@@ -271,11 +388,11 @@ function emitirTicket(db: DB, datos: {
   const ticketId = Number(r.lastInsertRowid);
   const insP = db.prepare('INSERT INTO ticket_pagos (ticket_id, forma_cobro_id, importe, entregado, cambio) VALUES (?, ?, ?, ?, ?)');
   for (const p of datos.pagos) insP.run(ticketId, p.forma_cobro_id, p.importe, p.entregado, p.cambio);
-  const ins = db.prepare('INSERT INTO ticket_lineas (ticket_id, articulo_id, descripcion, unidades, precio, iva, importe) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  const ins = db.prepare('INSERT INTO ticket_lineas (ticket_id, articulo_id, descripcion, unidades, precio, iva, importe, invitacion, por_peso) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
   // Lo vendido descuenta del stock (una anulación lo devuelve, porque sus unidades van en negativo).
   const mov = db.prepare("INSERT INTO stock_movimientos (articulo_id, cantidad, tipo, ref_id, nota) VALUES (?, ?, 'venta', ?, ?)");
   for (const l of datos.lineas) {
-    ins.run(ticketId, l.articulo_id, l.descripcion, l.unidades, l.precio, l.iva, importeLinea(l));
+    ins.run(ticketId, l.articulo_id, l.descripcion, l.unidades, l.precio, l.iva, importeLinea(l), l.invitacion ? 1 : 0, l.por_peso ? 1 : 0);
     if (l.articulo_id) mov.run(l.articulo_id, -l.unidades, ticketId, `Ticket ${serie}-${numero}`);
   }
   return ticketId;
@@ -336,7 +453,7 @@ export function anularTicket(db: DB, ticketId: number) {
     const nuevo = emitirTicket(db, {
       cuenta_id: t.cuenta_id, total: -t.total, pagos, serie: t.serie, cliente_id: t.cliente_id,
       anula_ticket_id: ticketId,
-      lineas: lineas.map(l => ({ articulo_id: l.articulo_id, descripcion: l.descripcion, unidades: -l.unidades, precio: l.precio, iva: l.iva })),
+      lineas: lineas.map(l => ({ articulo_id: l.articulo_id, descripcion: l.descripcion, unidades: -l.unidades, precio: l.precio, iva: l.iva, invitacion: l.invitacion, por_peso: l.por_peso })),
     });
     return getTicket(db, nuevo);
   });

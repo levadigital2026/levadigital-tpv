@@ -45,6 +45,7 @@ function cerrarModal() {
   $('#modal').classList.add('oculto');
   $('#modal-caja').classList.remove('ancho', 'a4');
   if (E.pedirTrasModal) { E.pedirTrasModal = false; setTimeout(mostrarPanelOperarios, 0); }
+  if (E.alCerrarModal) { const f = E.alCerrarModal; E.alCerrarModal = null; setTimeout(() => intentar(f), 0); }
   $('#modal-caja').innerHTML = '';
 }
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') cerrarModal(); });
@@ -165,11 +166,13 @@ function nombreCuenta(c) {
 }
 
 // ---------- Navegación ----------
-const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados, cierres: pintarCierres, clientes: () => pintarClientes(), stocks: () => pintarStocks(), modulos: pintarModulos };
+const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados, cierres: pintarCierres, clientes: () => pintarClientes(), stocks: () => pintarStocks(), modulos: pintarModulos, diseno: () => pintarDiseno() };
 // Pantallas que cuelgan de Configuración (el botón de herramientas del menú queda marcado).
-const VISTAS_CONFIG = new Set(['config', 'gestion', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres', 'modulos']);
+const VISTAS_CONFIG = new Set(['config', 'gestion', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres', 'modulos', 'diseno']);
 function ir(vista) {
   E.vista = vista;
+  // Los manejadores de una pantalla no deben seguir activos en otra.
+  const v = $('#vista'); v.onpointerdown = v.onchange = v.oninput = null;
   const marcada = VISTAS_CONFIG.has(vista) ? 'config' : vista;
   document.querySelectorAll('#menu button').forEach(b => b.classList.toggle('activo', b.dataset.vista === marcada));
   return VISTAS[vista]();
@@ -182,6 +185,8 @@ $('#menu').addEventListener('click', e => {
     E.seccionConfig = null;
   }
   E.volverA = null;
+  E.modoMesas = null;
+  if (E.vista === 'venta' && b.dataset.vista !== 'venta') comandaAutomatica(E.cuenta);
   if (b.dataset.vista === 'clientes') { E.eligiendoCliente = false; E.fichaCliente = null; E.volverCobro = false; }
   if (b.dataset.vista === 'stocks') E.tabStocks = E.tabStocks === 'nuevo_albaran' ? 'nuevo_albaran' : 'existencias';
   intentar(() => ir(b.dataset.vista));
@@ -214,7 +219,7 @@ async function pintarVenta() {
           <div class="linea-caja">
             <button class="linea-anular" data-anular="${l.id}">Anular</button>
             <div class="linea ${l.id === E.lineaSel ? 'sel' : ''}" data-linea="${l.id}">
-              <span class="uds">${uds(l.unidades)}</span><span>${esc(l.descripcion)}</span><span>${euros(Math.round(l.unidades * l.precio))}</span>
+              <span class="uds">${l.por_peso ? uds(l.unidades) + '<small>kg</small>' : uds(l.unidades)}</span><span>${esc(l.descripcion)}${l.por_peso ? `<small class="peso-linea">${euros(l.precio)}/kg</small>` : ''}</span><span>${l.invitacion ? '<b class="invitacion">Invitación</b>' : euros(Math.round(l.unidades * l.precio))}</span>
               ${l.detalle ? `<span class="det" title="Texto de la comanda">✎ ${esc(l.detalle)}</span>` : ''}
               ${l.orden_plato_id ? `<span class="op-plato">${esc(E.datos.ordenes_plato.find(o => o.id === l.orden_plato_id)?.nombre ?? '')}</span>` : ''}
             </div>
@@ -232,7 +237,7 @@ async function pintarVenta() {
     </section>
     <section class="panel articulos">
       ${arts.length ? '' : subfamilias.map(f => botonArticulo(f, f.color, 'Subfamilia', `data-familia="${f.id}"`)).join('')}
-      ${arts.map(a => botonArticulo(a, colorDe(a.familia_id), euros(a.precio))).join('')}
+      ${arts.map(a => botonArticulo(a, colorDe(a.familia_id), euros(a.precio) + (a.por_peso ? '/kg' : ''))).join('')}
       ${!arts.length && !subfamilias.length ? `<div class="vacio">${famActual ? 'Esta familia no tiene artículos' : 'No hay familias'}</div>` : ''}
     </section>
     <section class="panel mando">
@@ -285,7 +290,9 @@ function accionActiva(accion, c) {
     case 'borrar_todo': case 'marchar': case 'cliente': return !!c;
     case 'orden_plato': case 'comanda': return conLineas;
     case 'preticket': case 'efectivo_exacto': case 'tarjeta': return conLineas;
-    case 'borrar_linea': case 'detalle': return conLineas && !!E.lineaSel;
+    case 'borrar_linea': case 'detalle': case 'invitacion': return conLineas && !!E.lineaSel;
+    case 'dividir': return conLineas;
+    case 'traspasar': return true;
     default: return true;
   }
 }
@@ -311,13 +318,18 @@ async function accion(a) {
   switch (a) {
     case 'guardar': return guardarCuenta();
     case 'preticket': return verPreticket();
-    case 'nueva': E.cuenta = null; E.lineaSel = null; return pintarVenta();
-    case 'mesas': return ir('mesas');
+    case 'nueva': comandaAutomatica(c); E.cuenta = null; E.lineaSel = null; return pintarVenta();
+    case 'mesas': comandaAutomatica(c); return ir('mesas');
     case 'configuracion':
       if (!tienePermiso('configuracion')) return aviso('Tu operario no tiene permiso para entrar en configuración', true);
       return ir('config');
     case 'orden_plato': return elegirOrdenPlato();
     case 'cliente': return elegirClienteCuenta();
+    case 'traspasar':
+      if (!c?.lineas?.length) { E.modoMesas = 'traspasar'; aviso('Toca la mesa que quieres traspasar'); return ir('mesas'); }
+      return abrirTraspaso(c.id);
+    case 'dividir': return abrirDividir(c.id);
+    case 'invitacion': return invitarLinea(E.lineaSel);
     case 'marchar': return marcharCocina();
     case 'comanda': return verComanda();
     case 'borrar_linea': return borrarLinea(E.lineaSel);
@@ -454,6 +466,7 @@ async function guardarCuenta() {
   E.cuenta = null;
   E.lineaSel = null;
   aviso('Cuenta guardada');
+  comandaAutomatica(c);
   trasOperacion();
   return pintarVenta();
 }
@@ -558,6 +571,16 @@ $('#vista').addEventListener('click', e => intentar(async () => {
     return pintarVenta();
   }
   if (b.dataset.articulo) {
+    const art = E.datos.articulos.find(a => a.id === Number(b.dataset.articulo));
+    if (art?.por_peso) {
+      const kg = numeroCalc() || await pedirPeso(art);
+      if (!kg) return;
+      const cuenta = await asegurarCuenta();
+      E.cuenta = await api('POST', `/cuentas/${cuenta.id}/lineas`, { articulo_id: art.id, unidades: kg });
+      E.calc = '';
+      E.lineaSel = E.cuenta.lineas.at(-1)?.id ?? null;
+      return pintarVenta();
+    }
     const cuenta = await asegurarCuenta();
     const n = numeroCalc();
     E.cuenta = await api('POST', `/cuentas/${cuenta.id}/lineas`, { articulo_id: Number(b.dataset.articulo), unidades: n && n > 0 ? n : 1 });
@@ -565,7 +588,7 @@ $('#vista').addEventListener('click', e => intentar(async () => {
     E.lineaSel = E.cuenta.lineas.at(-1)?.id ?? null;
     return pintarVenta();
   }
-  if (b.dataset.cuenta) { E.cuenta = { id: Number(b.dataset.cuenta) }; E.lineaSel = null; return pintarVenta(); }
+  if (b.dataset.cuenta) { if (E.cuenta?.id !== Number(b.dataset.cuenta)) comandaAutomatica(E.cuenta); E.cuenta = { id: Number(b.dataset.cuenta) }; E.lineaSel = null; return pintarVenta(); }
   if (b.dataset.anular) return borrarLinea(Number(b.dataset.anular));
   if (b.dataset.linea) {
     if (b.dataset.arrastrado) { delete b.dataset.arrastrado; return; }
@@ -590,8 +613,11 @@ function opcionesCobro() {
   const o = leerOpcionesCobro();
   return { noImprimir: !!o.noImprimir, a4: !!o.a4, email: false };
 }
-function abrirCobro() {
+// opc.partes: dividir el total entre N personas (N pagos). opc.alCancelar / opc.despues: para Dividir cuenta.
+function abrirCobro(opc = {}) {
   const c = E.cuenta;
+  const partes = opc.partes > 1 ? opc.partes : 0;
+  const porDefecto = () => { const p = pendiente(); if (!partes) return p; const quedan = partes - pagos.length; return quedan <= 1 ? p : Math.min(p, Math.floor(c.total / partes)); };
   let entrada = '';
   const pagos = [];
   const guardadas = leerOpcionesCobro();
@@ -610,7 +636,8 @@ function abrirCobro() {
           <div class="cc"><small>Total</small><b>${euros(c.total)}</b></div>
           <div class="cc"><small>Cobrado</small><b>${euros(cobradoHasta())}</b></div>
           <div class="cc pendiente ${pend ? '' : 'hecho'}"><small>${pend ? 'Falta por cobrar' : 'Cambio'}</small><b>${pend ? euros(pend) : euros(Math.max(cambio(), 0))}</b></div>
-          <div class="cc"><small>Importe a añadir</small><b>${entrada ? euros(cent()) : '<span class="tenue">' + euros(pend) + '</span>'}</b></div>
+          <div class="cc"><small>${partes && pend ? `Pago ${Math.min(pagos.length + 1, partes)} de ${partes}` : 'Importe a añadir'}</small><b>${entrada ? euros(cent()) : '<span class="tenue">' + euros(pend ? porDefecto() : 0) + '</span>'}</b></div>
+          ${partes ? `<div class="cc partes"><small>Entre ${partes} personas</small><b>${euros(Math.floor(c.total / partes))}</b><small>cada una${c.total % partes ? ' (la última paga los céntimos que sobran)' : ''}</small></div>` : ''}
           <div class="pagos-lista">${pagos.length ? pagos.map((p, i) => `<div><span>${esc(p.nombre)}</span><b>${euros(p.importe)}</b><button data-quitar="${i}" title="Quitar este pago">✕</button></div>`).join('')
             : '<small class="tenue">Teclea un importe y toca la forma de pago. Sin importe se cobra lo que falta.</small>'}</div>
         </div>
@@ -639,8 +666,10 @@ function abrirCobro() {
       const ticket = await api('POST', `/cuentas/${c.id}/cobrar`, { pagos: pagos.map(p => ({ forma_cobro_id: p.forma_cobro_id, importe: p.importe })) });
       E.cuenta = null;
       E.lineaSel = null;
+      cerrarModal();
       await trasCobro(ticket, op);
-      return pintarVenta();
+      await pintarVenta();
+      if (opc.despues) { if ($('#modal').classList.contains('oculto')) await opc.despues(); else E.alCerrarModal = opc.despues; }
     } catch (e) { pagos.pop(); pintar(); throw e; }
   };
   pintar();
@@ -652,7 +681,7 @@ function abrirCobro() {
   $('#modal-caja').onclick = e => intentar(async () => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.m === 'cerrar') return cerrarModal();
+    if (b.dataset.m === 'cerrar') { cerrarModal(); return opc.alCancelar?.(); }
     if (b.dataset.m === 'cliente') { cerrarModal(); E.volverCobro = true; return elegirClienteCuenta(); }
     if (b.dataset.quitar !== undefined) { pagos.splice(Number(b.dataset.quitar), 1); return pintar(); }
     if (b.dataset.billete) { entrada = b.dataset.billete; return pintar(); }
@@ -668,7 +697,7 @@ function abrirCobro() {
       const f = formas.find(x => x.id === Number(b.dataset.forma));
       const pend = pendiente();
       if (pend <= 0) return terminar();
-      const importe = entrada ? cent() : pend;
+      const importe = entrada ? cent() : porDefecto();
       if (!(importe > 0)) return aviso('Importe no válido', true);
       if (importe > pend && f.tipo !== 'efectivo') return aviso(`Con ${f.nombre} no se puede cobrar más de lo que falta (${euros(pend)})`, true);
       pagos.push({ forma_cobro_id: f.id, nombre: f.nombre, tipo: f.tipo, importe });
@@ -702,7 +731,7 @@ function htmlTicket(t, titulo) {
     <div>${esc(t.serie)}-${t.numero} · ${hora(t.emitido_en)}</div>
     ${t.mesa_nombre ? `<div>${esc(t.zona_nombre)} · ${esc(t.mesa_nombre)}</div>` : ''}
     ${cl ? `<hr><div>Cliente: ${esc(cl.nombre)}</div>${cl.nif ? `<div>NIF: ${esc(cl.nif)}</div>` : ''}${cl.domicilio ? `<div>${esc(cl.domicilio)}</div>` : ''}${cl.localidad || cl.cp ? `<div>${esc([cl.cp, cl.localidad].filter(Boolean).join(' '))}</div>` : ''}` : ''}<hr>
-    ${t.lineas.map(l => `<div class="fila"><span>${uds(l.unidades)} ${esc(l.descripcion)}</span><span>${euros(l.importe)}</span></div>${l.alergenos ? `<div class="alerg-ticket">Alérgenos: ${esc(l.alergenos)}</div>` : ''}`).join('')}<hr>
+    ${t.lineas.map(l => `<div class="fila"><span>${l.por_peso ? uds(l.unidades) + ' kg' : uds(l.unidades)} ${esc(l.descripcion)}</span><span>${l.invitacion ? 'Invitación' : euros(l.importe)}</span></div>${l.por_peso ? `<div class="alerg-ticket">${uds(l.unidades)} kg x ${euros(l.precio)}/kg</div>` : ''}${l.alergenos ? `<div class="alerg-ticket">Alérgenos: ${esc(l.alergenos)}</div>` : ''}`).join('')}<hr>
     <div class="fila grande"><span>TOTAL</span><span>${euros(t.total)}</span></div>
     ${t.impuestos.map(i => `<div class="fila"><span>Base ${i.iva}%: ${euros(i.base)}</span><span>IVA ${euros(i.cuota)}</span></div>`).join('')}<hr>
     ${pagos ? pagos.map(p => `<div class="fila"><span>${esc(p.nombre)}</span><span>${euros(p.entregado || p.importe)}</span></div>`).join('')
@@ -780,39 +809,110 @@ async function pintarTickets() {
 }
 
 // ---------- Mesas ----------
+// Plano de la sala: lienzo de 1000 de ancho; posiciones y tamaños de mesas y objetos en esas unidades.
+const SILLA = 16;
+function sillasMesa(forma, plazas, w, h) {
+  const s = [], c = SILLA, m = 3;
+  if (forma === 'redonda') {
+    const rx = w / 2 - c / 2, ry = h / 2 - c / 2;
+    for (let i = 0; i < plazas; i++) { const a = -Math.PI / 2 + i * 2 * Math.PI / plazas; s.push([w / 2 + rx * Math.cos(a), h / 2 + ry * Math.sin(a)]); }
+    return s;
+  }
+  // Rectangular: sillas en los lados largos y, desde 6 plazas, una en cada cabecera. Cuadrada: repartidas en los 4 lados.
+  const horizontal = w >= h;
+  let lados;
+  if (forma === 'cuadrada') { lados = [0, 0, 0, 0]; for (let i = 0; i < plazas; i++) lados[[0, 2, 1, 3][i % 4]]++; }
+  else { const cab = plazas >= 6 ? 2 : 0, largo = plazas - cab; lados = horizontal ? [Math.ceil(largo / 2), cab / 2, Math.floor(largo / 2), cab / 2] : [cab / 2, Math.ceil(largo / 2), cab / 2, Math.floor(largo / 2)]; }
+  const [arriba, der, abajo, izq] = lados;
+  const repartir = (n, ini, fin) => Array.from({ length: n }, (_, i) => ini + (fin - ini) * (i + 1) / (n + 1));
+  repartir(arriba, 0, w).forEach(x => s.push([x, c / 2 - m]));
+  repartir(abajo, 0, w).forEach(x => s.push([x, h - c / 2 + m]));
+  repartir(izq, 0, h).forEach(y => s.push([c / 2 - m, y]));
+  repartir(der, 0, h).forEach(y => s.push([w - c / 2 + m, y]));
+  return s;
+}
+function svgMesa(m) {
+  const w = m.ancho, h = m.alto, c = SILLA, i = c - 2;
+  const sillas = sillasMesa(m.forma, m.plazas, w, h).map(([x, y]) => `<rect class="s" x="${x - c / 2}" y="${y - c / 2}" width="${c}" height="${c}" rx="${c / 3}"/>`).join('');
+  const mesa = m.forma === 'redonda'
+    ? `<ellipse class="t" cx="${w / 2}" cy="${h / 2}" rx="${w / 2 - i}" ry="${h / 2 - i}"/>`
+    : `<rect class="t" x="${i}" y="${i}" width="${w - 2 * i}" height="${h - 2 * i}" rx="8"/>`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${sillas}${mesa}</svg>`;
+}
+const OBJETOS_SALA = {
+  separador: { nombre: 'Separador', w: 220, h: 14 }, planta: { nombre: 'Planta', w: 50, h: 50 }, barra: { nombre: 'Barra', w: 300, h: 60 },
+  columna: { nombre: 'Columna', w: 40, h: 40 }, puerta: { nombre: 'Puerta', w: 70, h: 70 }, sofa: { nombre: 'Sofá', w: 160, h: 56 },
+};
+function svgObjeto(o) {
+  const w = o.ancho, h = o.alto;
+  switch (o.tipo) {
+    case 'planta': return `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="#4f8a3c"/>${[0, 72, 144, 216, 288].map(a => `<ellipse cx="50" cy="26" rx="13" ry="24" fill="#6fb04f" transform="rotate(${a} 50 50)"/>`).join('')}<circle cx="50" cy="50" r="10" fill="#3d6e2e"/></svg>`;
+    case 'separador': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="${Math.min(w, h) / 2}" fill="#8a6f55"/>${Array.from({ length: Math.floor(Math.max(w, h) / 30) }, (_, k) => w >= h ? `<circle cx="${15 + k * 30}" cy="${h / 2}" r="${Math.min(h, 14) / 3}" fill="#6fb04f"/>` : `<circle cx="${w / 2}" cy="${15 + k * 30}" r="${Math.min(w, 14) / 3}" fill="#6fb04f"/>`).join('')}</svg>`;
+    case 'barra': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="10" fill="#6f4e37"/><rect x="5" y="5" width="${w - 10}" height="${h - 10}" rx="7" fill="#8b6447"/></svg><span class="obj-texto">BARRA</span>`;
+    case 'columna': return `<svg viewBox="0 0 40 40"><rect width="40" height="40" rx="4" fill="#9aa3ad"/><rect x="6" y="6" width="28" height="28" rx="3" fill="#b8c0c8"/></svg>`;
+    case 'puerta': return `<svg viewBox="0 0 70 70"><path d="M2 68 L2 2 A66 66 0 0 1 68 68 Z" fill="rgba(0,100,252,.08)" stroke="#0064fc" stroke-width="2" stroke-dasharray="4 3"/><rect x="0" y="0" width="5" height="70" fill="#0064fc"/></svg>`;
+    case 'sofa': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="14" fill="#7a5c8f"/><rect x="8" y="${h * 0.35}" width="${w - 16}" height="${h * 0.55}" rx="9" fill="#9b7bb0"/></svg>`;
+  }
+  return '';
+}
+const altoLienzo = (mesas, objetos) => Math.max(600, ...mesas.map(m => (m.py ?? 0) + m.alto + 30), ...objetos.map(o => o.py + o.alto + 30));
+const caja = (x, H) => `left:${x.px / 10}%;top:${x.py / H * 100}%;width:${x.ancho / 10}%;height:${x.alto / H * 100}%`;
+// Mesas creadas desde la tabla (sin posición) se colocan solas en huecos.
+function colocar(mesas) {
+  let n = 0;
+  for (const m of mesas) if (m.px == null) { m.px = 30 + (n % 6) * 160; m.py = 30 + Math.floor(n / 6) * 160; n++; }
+  return mesas;
+}
+function htmlPlano(zona, mesas, objetos, estadoMesa) {
+  const H = altoLienzo(mesas, objetos);
+  return `<div class="lienzo" style="aspect-ratio:1000/${H};background:${esc(zona.color_fondo || '#ffffff')}">
+    ${objetos.map(o => `<div class="obj obj-${o.tipo}" style="${caja(o, H)}">${svgObjeto(o)}</div>`).join('')}
+    ${mesas.map(m => { const st = estadoMesa(m); return `<button class="mesa-plano ${st.clase}" data-mesa="${m.id}" style="${caja(m, H)}">${svgMesa(m)}
+      <span class="mesa-txt"><b>${esc(m.nombre)}</b><small>${st.texto}</small></span></button>`; }).join('')}
+  </div>`;
+}
+
 async function pintarMesas() {
   await cargarAbiertas();
   const zonas = E.datos.zonas;
   if (!E.zonaMesas || !zonas.some(z => z.id === E.zonaMesas)) E.zonaMesas = zonas.find(z => z.tipo === 'mesas')?.id ?? zonas[0]?.id;
   const zona = zonas.find(z => z.id === E.zonaMesas);
   const abiertaDe = m => E.abiertas.find(a => a.mesa_id === m.id);
+  const traspaso = E.modoMesas === 'traspasar';
   let cuerpo;
   if (zona?.tipo === 'mesas') {
-    const mesas = E.datos.mesas.filter(m => m.zona_id === zona.id);
-    const cols = Math.max(1, ...mesas.map(m => m.x + 1));
-    cuerpo = `<div class="plano" style="grid-template-columns:repeat(${cols}, minmax(110px, 1fr))">
-      ${mesas.map(m => { const a = abiertaDe(m); return `<button class="mesa ${a ? 'ocupada' : ''}" data-mesa="${m.id}" style="grid-column:${m.x + 1};grid-row:${m.y + 1}">
-        ${esc(m.nombre)}<small>${a ? euros(a.total) : 'Libre'}</small></button>`; }).join('')}
-    </div>`;
+    const mesas = colocar(E.datos.mesas.filter(m => m.zona_id === zona.id).map(m => ({ ...m })));
+    const objetos = (E.datos.zona_objetos ?? []).filter(o => o.zona_id === zona.id);
+    cuerpo = `<div class="plano-sala">${htmlPlano(zona, mesas, objetos, m => { const a = abiertaDe(m);
+      return { clase: (a ? 'ocupada' : 'libre') + (traspaso && !a ? ' apagada' : ''), texto: a ? euros(a.total) + (a.comensales ? ` · ${a.comensales}p` : '') : 'Libre' }; })}</div>`;
   } else {
     const cuentas = E.abiertas.filter(a => a.zona_id === zona?.id);
     cuerpo = `<div class="plano"><div class="lista-barra">
-      <button class="primario" data-nueva="1"><b>+ Nueva cuenta</b></button>
+      ${traspaso ? '' : '<button class="primario" data-nueva="1"><b>+ Nueva cuenta</b></button>'}
       ${cuentas.map(a => `<button data-abrir="${a.id}"><b>${esc(a.nombre || 'Cuenta ' + a.id)}</b><br>${euros(a.total)}</button>`).join('')}
     </div></div>`;
   }
   $('#vista').innerHTML = `<div class="mesas">
+    ${traspaso ? '<div class="banda-asignar">Traspasar: toca la mesa (o la cuenta) de <b>origen</b>. <button data-cancelar-traspaso="1">Cancelar</button></div>' : ''}
     <div class="pestanas">${zonas.map(z => `<button data-zona="${z.id}" class="${z.id === E.zonaMesas ? 'activa' : ''}">${esc(z.nombre)}</button>`).join('')}</div>
     ${cuerpo}</div>`;
   $('#vista').onclick = e => intentar(async () => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.dataset.cancelarTraspaso) { E.modoMesas = null; return pintarMesas(); }
     if (b.dataset.zona) { E.zonaMesas = Number(b.dataset.zona); return pintarMesas(); }
+    if (traspaso) {
+      const id = b.dataset.mesa ? abiertaDe(E.datos.mesas.find(m => m.id === Number(b.dataset.mesa)))?.id : Number(b.dataset.abrir);
+      if (!id) return aviso('Esa mesa está libre: elige una mesa ocupada', true);
+      E.modoMesas = null;
+      await pintarMesas();
+      return abrirTraspaso(id);
+    }
     if (b.dataset.mesa) {
       const mesa = E.datos.mesas.find(m => m.id === Number(b.dataset.mesa));
       let comensales = 0;
       if (!abiertaDe(mesa)) {
-        const r = prompt(`Comensales en ${mesa.nombre}`, '2');
+        const r = prompt(`Comensales en ${mesa.nombre}`, String(mesa.plazas || 2));
         if (r === null) return;
         comensales = Number(r) || 0;
       }
@@ -989,12 +1089,14 @@ async function pintarCierres() {
 
 // ---------- Gestión ----------
 const GESTION = {
-  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['orden_plato_id', 'Orden de plato', 'ordenes_plato'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'], ['alergenos', 'Alérgenos', 'alergenos'], ['codigo_barras', 'Código de barras'], ['controlar_stock', 'Controlar stock', 'bool'], ['stock_minimo', 'Stock mínimo', 'num'], ['coste', 'Coste (€)', 'euros']] },
+  articulos: { titulo: 'Artículos', campos: [['nombre', 'Nombre'], ['precio', 'Precio (€)', 'euros'], ['iva', 'IVA %', 'num'], ['familia_id', 'Familia', 'familias'], ['orden_plato_id', 'Orden de plato', 'ordenes_plato'], ['orden', 'Orden', 'num'], ['activo', 'Activo', 'bool'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'], ['alergenos', 'Alérgenos', 'alergenos'], ['codigo_barras', 'Código de barras'], ['controlar_stock', 'Controlar stock', 'bool'], ['stock_minimo', 'Stock mínimo', 'num'], ['coste', 'Coste (€)', 'euros'],
+    ['por_peso', 'Se vende por peso (precio por kg)', 'bool'], ['impresoras', 'Impresión de comanda (sin marcar = las de la familia)', 'impresorasart']] },
   proveedores: { titulo: 'Proveedores', campos: [['nombre', 'Nombre'], ['nif', 'NIF'], ['telefono', 'Teléfono'], ['email', 'Email'], ['direccion', 'Dirección'], ['contacto', 'Persona de contacto'], ['observaciones', 'Observaciones']] },
-  familias: { titulo: 'Familias', campos: [['nombre', 'Nombre'], ['color', 'Color', 'color'], ['padre_id', 'Subfamilia de', 'familias'], ['departamento_id', 'Departamento', 'departamentos'], ['orden', 'Orden', 'num'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop']] },
+  familias: { titulo: 'Familias', campos: [['nombre', 'Nombre'], ['color', 'Color', 'color'], ['padre_id', 'Subfamilia de', 'familias'], ['departamento_id', 'Departamento', 'departamentos'], ['orden', 'Orden', 'num'], ['imagen', 'Imagen', 'imagen'], ['color_fondo', 'Color de fondo', 'colorop'], ['color_texto', 'Color de letra', 'colorop'],
+    ['impresoras', 'Impresoras de comanda de la familia', 'impresorasfam']] },
   departamentos: { titulo: 'Departamentos', campos: [['nombre', 'Nombre']] },
-  zonas: { titulo: 'Zonas', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipozona'], ['orden', 'Orden', 'num']] },
-  mesas: { titulo: 'Mesas', campos: [['nombre', 'Nombre'], ['zona_id', 'Zona', 'zonas'], ['x', 'Columna', 'num'], ['y', 'Fila', 'num']] },
+  zonas: { titulo: 'Zonas', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipozona'], ['orden', 'Orden', 'num'], ['color_fondo', 'Color de fondo del plano', 'colorop']] },
+  mesas: { titulo: 'Mesas', campos: [['nombre', 'Nombre'], ['zona_id', 'Zona', 'zonas'], ['forma', 'Forma', 'formamesa'], ['plazas', 'Comensales (sillas)', 'num']] },
   formas_cobro: { titulo: 'Formas de cobro', campos: [['nombre', 'Nombre'], ['tipo', 'Tipo', 'tipocobro'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   operarios: { titulo: 'Operarios', campos: [['nombre', 'Nombre'], ['pin', 'Clave (vacía = entra sin clave)', 'clave'], ['rfid', 'Pulsera RFID', 'rfid'], ['permisos', 'Permisos', 'permisos'], ['orden', 'Orden', 'num']] },
   ordenes_plato: { titulo: 'Órdenes de plato', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
@@ -1004,7 +1106,7 @@ const GESTION = {
     ['smtp_servidor', 'Correo · Servidor SMTP'], ['smtp_puerto', 'Correo · Puerto SMTP', 'num'], ['smtp_cifrado', 'Correo · Cifrado', 'cifrado'], ['smtp_usuario', 'Correo · Usuario'], ['smtp_clave', 'Correo · Contraseña', 'clave'],
     ['email_emisor', 'Correo · Email emisor'], ['email_asunto', 'Correo · Asunto (vacío = automático)'], ['email_encabezado', 'Correo · Texto de encabezado'], ['email_pie', 'Correo · Texto de pie'],
     ['mail_en_cierre', 'Enviar el cierre de caja por correo', 'bool'], ['email_cierre', 'Correo · Destinatarios del cierre (separados por ;)']] },
-  impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
+  impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['envio', 'Envío de comandas', 'envio'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   comentarios: { titulo: 'Comentarios de comanda', campos: [['texto', 'Comentario'], ['familia_id', 'Solo familia', 'familias'], ['articulo_id', 'Solo artículo', 'articulos'], ['orden', 'Orden', 'num']] },
   conceptos_pago: { titulo: 'Conceptos de pago', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
   botones: { titulo: 'Botonera', campos: [['texto', 'Texto'], ['accion', 'Acción', 'accion'], ['color', 'Color', 'colorop'], ['orden', 'Orden', 'num'], ['visible', 'Visible', 'bool']] },
@@ -1014,6 +1116,8 @@ const OPCIONES = {
   tipozona: [['mesas', 'Mesas'], ['barra', 'Barra']],
   tipocobro: [['efectivo', 'Efectivo'], ['tarjeta', 'Tarjeta'], ['pendiente', 'Pendiente de cobro'], ['otro', 'Otro']],
   tipopuesto: [['tpv', 'TPV'], ['pda', 'PDA camarero'], ['kds', 'Pantalla de cocina']],
+  envio: [['auto', 'Automático al guardar o salir de la mesa'], ['manual', 'Solo con el botón Enviar comanda']],
+  formamesa: [['cuadrada', 'Cuadrada'], ['rectangular', 'Rectangular'], ['redonda', 'Redonda']],
   cifrado: [['tls', 'TLS (STARTTLS, puerto 587)'], ['ssl', 'SSL (puerto 465)'], ['ninguno', 'Ninguno (puerto 25)']],
   usoimpresora: [['cocina', 'Cocina'], ['barra', 'Barra'], ['tickets', 'Tickets'], ['otro', 'Otro']],
 };
@@ -1032,12 +1136,15 @@ function valorCelda(tipo, v) {
   if (tipo === 'alergenos') return `<span class="alerg-tabla">${iconosAlergenos(v)}</span>`;
   if (tipo === 'clave') return v ? '••••' : 'Sin clave';
   if (tipo === 'rfid') return v ? 'Sí' : '—';
+  if (tipo === 'impresorasart' && !v) return 'Como la familia';
   if (LISTAS[tipo]) return String(v || '').split(',').filter(Boolean).map(p => esc(LISTAS[tipo]()[p] ?? p)).join(', ') || 'Ninguno';
   return esc(v);
 }
 
 // Campos de selección múltiple (botones que se encienden y apagan).
-const LISTAS = { permisos: () => E.datos.permisos, secciones: () => E.datos.secciones_cierre };
+const impresorasComanda = () => Object.fromEntries((E.datos.impresoras ?? []).filter(i => i.uso !== 'tickets').map(i => [i.id, i.nombre]));
+const LISTAS = { permisos: () => E.datos.permisos, secciones: () => E.datos.secciones_cierre,
+  impresorasfam: impresorasComanda, impresorasart: () => ({ ninguna: 'No imprimir', ...impresorasComanda() }) };
 
 function campoForm([k, etiqueta, tipo], fila) {
   const v = fila?.[k];
@@ -1087,14 +1194,16 @@ async function pintarGestion(editar) {
           <form class="form" id="f-gestion">${def.campos.map(c => campoForm(c, fila)).join('')}
             <div class="botones" style="padding:0"><button class="primario" type="submit">Guardar</button>
             ${editar !== 'nuevo' ? '<button type="button" class="peligro" id="b-borrar">Borrar</button>' : ''}
-            ${E.tablaGestion === 'puestos' && editar !== 'nuevo' ? '<button type="button" data-probar-correo="1">Probar el correo</button>' : ''}</div>
+            ${E.tablaGestion === 'puestos' && editar !== 'nuevo' ? '<button type="button" data-probar-correo="1">Probar el correo</button>' : ''}
+            ${E.tablaGestion === 'zonas' && editar !== 'nuevo' && fila?.tipo === 'mesas' ? `<button type="button" data-disenar="${fila.id}">Diseñar la sala</button>` : ''}</div>
           </form>` : '<div class="vacio">Selecciona una fila o pulsa Añadir</div>'}
       </section>
     </div></div>`;
 
   $('#vista').onclick = e => intentar(async () => {
-    const b = e.target.closest('[data-volver],[data-editar],#b-borrar,[data-elegir-imagen],[data-quitar-imagen],[data-alergeno],[data-auto-imagenes],[data-probar-correo]');
+    const b = e.target.closest('[data-volver],[data-editar],#b-borrar,[data-elegir-imagen],[data-quitar-imagen],[data-alergeno],[data-auto-imagenes],[data-probar-correo],[data-disenar]');
     if (!b) return;
+    if (b.dataset.disenar) { E.zonaDiseno = Number(b.dataset.disenar); E.volverA = 'gestion'; return ir('diseno'); }
     if (b.dataset.probarCorreo) {
       const para = prompt('¿A qué correo envío la prueba? (guarda antes los cambios)');
       if (!para) return;
@@ -1105,6 +1214,11 @@ async function pintarGestion(editar) {
     if (b.dataset.alergeno) {
       b.classList.toggle('activo');
       const caja = b.closest('.campo-alergenos');
+      // "No imprimir" no se combina con impresoras.
+      if (caja.querySelector('[data-alergeno="ninguna"]')) {
+        if (b.dataset.alergeno === 'ninguna' && b.classList.contains('activo')) caja.querySelectorAll('[data-alergeno].activo').forEach(x => x !== b && x.classList.remove('activo'));
+        else if (b.dataset.alergeno !== 'ninguna') caja.querySelector('[data-alergeno="ninguna"]').classList.remove('activo');
+      }
       caja.querySelector('input').value = [...caja.querySelectorAll('[data-alergeno].activo')].map(x => x.dataset.alergeno).join(',');
       return;
     }
@@ -1154,6 +1268,7 @@ async function pintarGestion(editar) {
       : await api('PUT', `/gestion/${E.tablaGestion}/${editar}`, datos);
     aviso('Guardado');
     await cargarDatos();
+    if (E.tablaGestion === 'zonas' && editar === 'nuevo' && r.tipo === 'mesas') { E.zonaDiseno = r.id; E.volverA = 'gestion'; return ir('diseno'); }
     return pintarGestion(r.id);
   });
 }
@@ -1182,7 +1297,7 @@ async function pintarEmpresa() {
 
 // ---------- Configuración ----------
 function cabeceraConfig(titulo) {
-  const volver = E.volverA === 'stocks' ? 'Stocks' : E.seccionConfig || 'Configuración';
+  const volver = E.volverA === 'stocks' ? 'Stocks' : E.volverA === 'gestion' ? 'Zonas' : E.seccionConfig || 'Configuración';
   return `<div class="cab-config"><button data-volver="1">← ${esc(volver)}</button><h2>${esc(titulo)}</h2></div>`;
 }
 
@@ -1204,6 +1319,7 @@ const SECCIONES_CONFIG = [
   ]],
   ['Local', [
     ['zonas', 'Zonas', 'Barra, comedor, terraza...'],
+    ['diseno', 'Diseño de salas', 'Mesas, colores, separadores y plantas'],
     ['mesas', 'Mesas', 'Mesas de cada zona'],
     ['puestos', 'Puestos', 'TPV, PDA y pantallas de cocina'],
     ['impresoras', 'Impresoras', 'Tickets, cocina y barra'],
@@ -1268,6 +1384,7 @@ function pintarConfig() {
       E.familia = null;
       return aviso(`Carta cargada: ${r.familias} familias y ${r.articulos} artículos`);
     }
+    if (k === 'diseno') { E.volverA = null; return ir('diseno'); }
     if (['abiertas', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres'].includes(k)) return ir(k);
     if (k === 'informes') return ir('caja');
     E.tablaGestion = k;
@@ -1487,19 +1604,53 @@ function marcharCocina() {
     if (!b?.dataset.op) return;
     const r = await api('POST', `/cuentas/${c.id}/marchar`, { orden_plato_id: Number(b.dataset.op) });
     cerrarModal();
-    aviso(`Enviado: ${r.texto}`);
+    const mal = (r.impresoras ?? []).filter(x => !x.ok);
+    if (mal.length) aviso(`${r.texto}: no se pudo imprimir en ${mal.map(x => x.impresora).join(', ')}`, true);
+    else aviso(`Enviado: ${r.texto}${r.impresoras?.length ? ' · ' + r.impresoras.map(x => x.impresora).join(', ') : ''}`);
   });
 }
 
 async function verComanda() {
-  const r = await api('GET', `/cuentas/${E.cuenta.id}/comanda`);
+  const c = E.cuenta;
+  const [r, pend] = await Promise.all([api('GET', `/cuentas/${c.id}/comanda`), api('GET', `/cuentas/${c.id}/comanda/pendiente`)]);
+  const hayImpresoras = (E.datos.impresoras ?? []).some(i => i.activa && i.uso !== 'tickets');
+  const pendDe = id => pend.find(p => p.id === id);
+  const bloque = (titulo, grupos, p) => `<div class="ticket comanda-previa"><div class="c"><b>${esc(titulo)}</b><br>${esc(r.cuenta)} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}${E.operario ? ' · ' + esc(E.operario.nombre) : ''}</div>
+      ${grupos.map(g => `<div class="grupo-comanda">— ${esc(g.nombre.toUpperCase())} —</div>${g.lineas.map(l => `<div class="fila"><span>${uds(l.unidades)} x ${esc(l.texto)}</span></div>`).join('')}`).join('')}
+      ${p ? `<div class="pendiente-comanda">Sin enviar: ${p.lineas.map(l => `${uds(l.unidades)} ${esc(l.texto)}`).join(', ')}</div>` : r.por_impresora ? '<div class="enviada-comanda">✓ Enviada</div>' : ''}</div>`;
   abrirModal(`<h2><span>Comanda</span><button data-m="cerrar">✕</button></h2>
-    <div class="ticket comanda-previa"><div class="c"><b>${esc(r.cuenta)}</b><br>${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}${E.operario ? ' · ' + esc(E.operario.nombre) : ''}</div>
-      ${r.grupos.map(g => `<div class="grupo-comanda">— ${esc(g.nombre.toUpperCase())} —</div>${g.lineas.map(l => `<div class="fila"><span>${uds(l.unidades)} x ${esc(l.texto)}</span></div>`).join('')}`).join('')}
+    <div class="comandas-impresoras">
+      ${r.por_impresora.map(i => bloque(i.nombre, i.grupos, pendDe(i.id))).join('')}
+      ${r.sin_impresora.length ? bloque(hayImpresoras ? 'Sin impresora asignada' : 'Comanda', r.sin_impresora, null) : ''}
     </div>
-    <p class="nota" style="padding:0 16px">Así saldrá en la impresora de cocina o barra cuando conectemos las impresoras.</p>
-    <div class="botones"><button data-m="cerrar">Cerrar</button></div>`);
-  $('#modal-caja').onclick = e => { if (e.target.closest('[data-m="cerrar"]')) cerrarModal(); };
+    ${hayImpresoras ? '' : '<p class="nota" style="padding:0 16px">No hay impresoras de cocina o barra. Créalas en Configuración > Local > Impresoras y asígnalas a las familias o artículos.</p>'}
+    <div class="botones">
+      ${hayImpresoras ? `<button class="primario" data-m="enviar" ${pend.length ? '' : 'disabled'}>Enviar comanda</button><button data-m="reenviar">Reenviar a cocina</button>` : ''}
+      <button data-m="cerrar">Cerrar</button></div>`);
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (b?.dataset.m === 'cerrar') return cerrarModal();
+    if (b?.dataset.m === 'enviar' || b?.dataset.m === 'reenviar') {
+      if (b.dataset.m === 'reenviar' && !confirm('¿Volver a imprimir toda la comanda? Saldrá marcada como REENVÍO.')) return;
+      const res = await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: b.dataset.m });
+      avisoComanda(res);
+      return verComanda();
+    }
+  });
+}
+
+function avisoComanda(res) {
+  const mal = res.enviadas.filter(x => !x.ok), bien = res.enviadas.filter(x => x.ok);
+  if (mal.length) aviso(`No se pudo imprimir en ${mal.map(x => `${x.impresora} (${x.error})`).join(', ')}. Queda pendiente.`, true);
+  else if (bien.length) aviso(`Comanda enviada a ${bien.map(x => x.impresora).join(', ')}`);
+}
+
+// Al guardar la cuenta o salir de ella, lo nuevo sale solo en las impresoras con envío automático.
+async function comandaAutomatica(cuenta) {
+  if (!cuenta?.id || !cuenta.lineas?.length) return;
+  if (!(E.datos.impresoras ?? []).some(i => i.activa && i.uso !== 'tickets' && i.envio !== 'manual')) return;
+  try { avisoComanda(await api('POST', `/cuentas/${cuenta.id}/comanda/enviar`, { modo: 'auto' })); }
+  catch (e) { aviso('Comanda: ' + e.message, true); }
 }
 
 // ---------- Control de empleados ----------
@@ -1973,7 +2124,7 @@ function htmlA4(d, titulo) {
     </div>
     ${c ? `<div class="doc-cliente"><small>Cliente</small><b>${esc(c.nombre)}</b>${c.nif ? '<br>NIF ' + esc(c.nif) : ''}${c.domicilio ? '<br>' + esc(c.domicilio) : ''}${c.cp || c.localidad ? '<br>' + esc([c.cp, c.localidad, c.provincia].filter(Boolean).join(' ')) : ''}</div>` : ''}
     <table class="doc-lineas"><thead><tr><th>Descripción</th><th class="num">Uds.</th><th class="num">Precio</th><th class="num">IVA</th><th class="num">Importe</th></tr></thead><tbody>
-      ${d.lineas.map(l => `<tr><td>${esc(l.descripcion)}</td><td class="num">${uds(l.unidades)}</td><td class="num">${euros(l.precio)}</td><td class="num">${l.iva}%</td><td class="num">${euros(l.importe)}</td></tr>`).join('')}
+      ${d.lineas.map(l => `<tr><td>${esc(l.descripcion)}${l.invitacion ? ' <i>(invitación)</i>' : ''}</td><td class="num">${uds(l.unidades)}${l.por_peso ? ' kg' : ''}</td><td class="num">${euros(l.invitacion ? 0 : l.precio)}${l.por_peso ? '/kg' : ''}</td><td class="num">${l.iva}%</td><td class="num">${l.invitacion ? 'Invitación' : euros(l.importe)}</td></tr>`).join('')}
     </tbody></table>
     <table class="doc-totales">${d.impuestos.map(i => `<tr><td>Base ${i.iva}%</td><td class="num">${euros(i.base)}</td><td>Cuota IVA</td><td class="num">${euros(i.cuota)}</td></tr>`).join('')}
       <tr class="doc-total"><td colspan="3">TOTAL</td><td class="num">${euros(d.total)}</td></tr></table>
@@ -2295,4 +2446,329 @@ async function pintarNuevoAlbaran(pestanas) {
       return pintarStocks();
     }
   });
+}
+
+// ---------- Peso ----------
+// Artículo por peso: con balanza el peso vendrá de ella; sin balanza se escribe en pantalla (kg).
+function pedirPeso(art) {
+  return new Promise(resolve => {
+    let txt = '';
+    const kg = () => txt ? Number(txt.replace(',', '.')) : 0;
+    const pintar = () => {
+      abrirModal(`<h2><span>${esc(art.nombre)} · ${euros(art.precio)}/kg</span><button data-m="cerrar">✕</button></h2>
+        <div class="peso">
+          <div class="cc"><small>Peso</small><b>${txt ? esc(txt) : '0'} kg</b></div>
+          <div class="cc"><small>Importe</small><b>${euros(Math.round(kg() * art.precio))}</b></div>
+          <p class="tenue">${moduloActivo('balanza') ? 'La lectura de la balanza llega con la fase de periféricos: de momento escribe el peso.' : 'Sin balanza: escribe el peso en kilos (por ejemplo 0,350).'}</p>
+          <div class="teclado">${['7', '8', '9', 'C', '4', '5', '6', '⌫', '1', '2', '3', '', '0', ',', '', ''].map(k => k ? `<button data-ct="${k}">${k}</button>` : '<span></span>').join('')}</div>
+          <div class="botones" style="padding:0"><button class="primario" data-m="ok" ${kg() > 0 ? '' : 'disabled'}>Añadir</button><button data-m="cerrar">Cancelar</button></div>
+        </div>`);
+    };
+    pintar();
+    $('#modal-caja').onclick = e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.m === 'cerrar') { cerrarModal(); return resolve(null); }
+      if (b.dataset.m === 'ok') { cerrarModal(); return resolve(kg()); }
+      const k = b.dataset.ct;
+      if (k === 'C') txt = '';
+      else if (k === '⌫') txt = txt.slice(0, -1);
+      else if (k === ',') { if (!txt.includes(',')) txt = (txt || '0') + ','; }
+      else if (k && txt.length < 7 && !/,\d{3}$/.test(txt)) txt += k;
+      pintar();
+    };
+  });
+}
+
+// ---------- Invitación ----------
+async function invitarLinea(id) {
+  const l = E.cuenta?.lineas.find(x => x.id === id);
+  if (!l) return aviso('Toca primero la línea que quieres invitar', true);
+  if (!tienePermiso('invitar')) return aviso('Tu operario no tiene permiso para invitar', true);
+  if (l.invitacion) {
+    if (!confirm(`¿Quitar la invitación de ${l.descripcion}? Vuelve a su precio.`)) return;
+    E.cuenta = await api('POST', `/lineas/${id}/invitar`, { quitar: true });
+    return pintarVenta();
+  }
+  let unidades = l.unidades;
+  if (!l.por_peso && l.unidades > 1) {
+    const r = prompt(`¿Cuántas unidades de ${l.descripcion} invitas? (hay ${uds(l.unidades)})`, '1');
+    if (r === null) return;
+    unidades = Number(r.replace(',', '.'));
+  }
+  E.cuenta = await api('POST', `/lineas/${id}/invitar`, { unidades });
+  E.lineaSel = null;
+  aviso(`Invitación: ${l.descripcion}`);
+  return pintarVenta();
+}
+
+// ---------- Traspasar mesa ----------
+// Origen: la cuenta en pantalla (o la mesa que se toque). Destino: otra mesa (si está ocupada se juntan),
+// otra cuenta abierta o una cuenta nueva. Se puede pasar todo o solo algunos artículos.
+async function abrirTraspaso(origenId) {
+  const c = await api('GET', `/cuentas/${origenId}`);
+  await cargarAbiertas();
+  const sel = new Map();      // línea -> unidades a pasar
+  let todo = true, destino = null, zonaId = c.zona_id;
+  const nombreDestino = () => !destino ? '' : destino.mesa_id ? (E.datos.mesas.find(m => m.id === destino.mesa_id)?.nombre ?? '')
+    : destino.cuenta_id ? nombreCuenta(E.abiertas.find(a => a.id === destino.cuenta_id) ?? {}) : 'Cuenta nueva';
+  const pintar = () => {
+    const zona = E.datos.zonas.find(z => z.id === zonaId);
+    const libresYOcupadas = E.datos.mesas.filter(m => m.zona_id === zonaId);
+    const abiertaDe = m => E.abiertas.find(a => a.mesa_id === m.id);
+    abrirModal(`<h2><span>Traspasar ${esc(nombreCuenta(c))}</span><button data-m="cerrar">✕</button></h2>
+      <div class="traspaso">
+        <div>
+          <div class="pestanas"><button data-todo="1" class="${todo ? 'activa' : ''}">Toda la cuenta</button><button data-todo="0" class="${todo ? '' : 'activa'}">Elegir artículos</button></div>
+          <div class="lineas-traspaso">${c.lineas.map(l => { const n = sel.get(l.id) ?? 0; return `<button data-linea-t="${l.id}" class="${todo || n ? 'marcada' : ''}" ${todo ? 'disabled' : ''}>
+            <span>${todo ? uds(l.unidades) : `${uds(n)} / ${uds(l.unidades)}`}</span><span>${esc(l.descripcion)}</span>${!todo && n ? `<i data-menos="${l.id}">−</i>` : ''}</button>`; }).join('')}</div>
+          ${todo ? '' : '<small class="tenue">Cada toque pasa una unidad más; con − la devuelves.</small>'}
+        </div>
+        <div>
+          <b>Destino</b>
+          <div class="pestanas">${E.datos.zonas.map(z => `<button data-zona-t="${z.id}" class="${z.id === zonaId ? 'activa' : ''}">${esc(z.nombre)}</button>`).join('')}</div>
+          <div class="destinos">
+            ${zona?.tipo === 'mesas' ? libresYOcupadas.map(m => { const a = abiertaDe(m); const yo = a?.id === c.id;
+              return `<button data-mesa-t="${m.id}" class="${a ? 'ocupada' : ''} ${destino?.mesa_id === m.id ? 'elegida' : ''}" ${yo ? 'disabled' : ''}><b>${esc(m.nombre)}</b><small>${yo ? 'Origen' : a ? euros(a.total) : 'Libre'}</small></button>`; }).join('')
+              : `<button data-nueva-t="1" class="${destino?.nueva ? 'elegida' : ''}"><b>+ Cuenta nueva</b><small>${esc(zona?.nombre ?? '')}</small></button>
+                 ${E.abiertas.filter(a => a.zona_id === zonaId && a.id !== c.id && !a.mesa_id).map(a => `<button data-cuenta-t="${a.id}" class="ocupada ${destino?.cuenta_id === a.id ? 'elegida' : ''}"><b>${esc(a.nombre || 'Cuenta ' + a.id)}</b><small>${euros(a.total)}</small></button>`).join('')}`}
+          </div>
+        </div>
+      </div>
+      <div class="botones"><button class="primario" data-m="ok" ${destino && (todo || sel.size) ? '' : 'disabled'}>Traspasar${destino ? ' a ' + esc(nombreDestino()) : ''}</button><button data-m="cerrar">Cancelar</button></div>`);
+  };
+  pintar();
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button,[data-menos]');
+    if (!b) return;
+    if (b.dataset.m === 'cerrar') return cerrarModal();
+    if (b.dataset.todo) { todo = b.dataset.todo === '1'; return pintar(); }
+    if (b.dataset.menos) { const id = Number(b.dataset.menos); const n = (sel.get(id) ?? 0) - 1; n > 0 ? sel.set(id, n) : sel.delete(id); e.stopPropagation(); return pintar(); }
+    if (b.dataset.lineaT) {
+      const l = c.lineas.find(x => x.id === Number(b.dataset.lineaT));
+      const n = sel.get(l.id) ?? 0;
+      sel.set(l.id, l.por_peso ? l.unidades : Math.min(l.unidades, n + 1));
+      return pintar();
+    }
+    if (b.dataset.zonaT) { zonaId = Number(b.dataset.zonaT); return pintar(); }
+    if (b.dataset.mesaT) { destino = { mesa_id: Number(b.dataset.mesaT) }; return pintar(); }
+    if (b.dataset.nuevaT) { destino = { zona_id: zonaId, nueva: true }; return pintar(); }
+    if (b.dataset.cuentaT) { destino = { cuenta_id: Number(b.dataset.cuentaT) }; return pintar(); }
+    if (b.dataset.m === 'ok') {
+      const nombre = nombreDestino();
+      const r = await api('POST', `/cuentas/${c.id}/traspasar`, { ...destino, lineas: todo ? undefined : [...sel].map(([id, unidades]) => ({ id, unidades })) });
+      cerrarModal();
+      E.cuenta = r.destino; E.lineaSel = null;
+      aviso(`Traspasado a ${nombre}`);
+      return ir('venta');
+    }
+  });
+}
+
+// ---------- Dividir cuenta ----------
+// Entre X personas (un ticket con X pagos) o pasando artículos a tickets nuevos que se cobran uno a uno,
+// hasta cobrar el resto de la cuenta principal.
+async function abrirDividir(origenId) {
+  const c = await api('GET', `/cuentas/${origenId}`);
+  if (c.estado !== 'abierta' || !c.lineas.length) { E.cuenta = null; return pintarVenta(); }
+  let modo = E.modoDividir ?? 'articulos', personas = 2;
+  const sel = new Map();
+  const totalSel = () => c.lineas.reduce((n, l) => n + Math.round((sel.get(l.id) ?? 0) * l.precio), 0);
+  const pintar = () => {
+    abrirModal(`<h2><span>Dividir ${esc(nombreCuenta(c))} · ${euros(c.total)}</span><button data-m="cerrar">✕</button></h2>
+      <div class="pestanas" style="padding:0 12px"><button data-modo="articulos" class="${modo === 'articulos' ? 'activa' : ''}">Por artículos</button><button data-modo="personas" class="${modo === 'personas' ? 'activa' : ''}">Entre personas</button></div>
+      ${modo === 'personas' ? `<div class="dividir-personas">
+          <div class="contador-personas"><button data-p="-1">−</button><b>${personas}</b><button data-p="1">+</button></div>
+          <div class="cc"><small>Cada persona paga</small><b>${euros(Math.floor(c.total / personas))}</b></div>
+          <p class="tenue">Se cobra en ${personas} pagos (cada uno con su forma de pago) y sale un solo ticket.</p>
+        </div>
+        <div class="botones"><button class="primario" data-m="personas">Cobrar entre ${personas}</button><button data-m="cerrar">Cancelar</button></div>`
+      : `<div class="dividir">
+          <div><b>Cuenta principal</b><small class="tenue"> · toca para pasar una unidad</small>
+            <div class="lineas-traspaso">${c.lineas.map(l => { const queda = Math.round((l.unidades - (sel.get(l.id) ?? 0)) * 1000) / 1000;
+              return queda > 0 ? `<button data-pasar="${l.id}"><span>${uds(queda)}</span><span>${esc(l.descripcion)}</span><span>${l.invitacion ? 'Inv.' : euros(Math.round(queda * l.precio))}</span></button>` : ''; }).join('')}</div>
+            <div class="total-div">Queda ${euros(c.total - totalSel())}</div></div>
+          <div><b>Ticket nuevo</b><small class="tenue"> · toca para devolver</small>
+            <div class="lineas-traspaso">${[...sel].map(([id, n]) => { const l = c.lineas.find(x => x.id === id);
+              return `<button data-devolver="${id}" class="marcada"><span>${uds(n)}</span><span>${esc(l.descripcion)}</span><span>${l.invitacion ? 'Inv.' : euros(Math.round(n * l.precio))}</span></button>`; }).join('') || '<div class="vacio">Pasa aquí lo que paga esta persona</div>'}</div>
+            <div class="total-div"><b>${euros(totalSel())}</b></div></div>
+        </div>
+        <div class="botones"><button class="primario" data-m="parte" ${sel.size ? '' : 'disabled'}>Cobrar ticket nuevo · ${euros(totalSel())}</button>
+          <button class="cobrar-resto" data-m="resto">Cobrar el resto · ${euros(c.total - totalSel())}</button><button data-m="cerrar">Cerrar</button></div>`}`);
+  };
+  pintar();
+  const volver = async () => { const o = await api('GET', `/cuentas/${origenId}`).catch(() => null);
+    E.cuenta = o?.estado === 'abierta' ? o : null; await pintarVenta(); if (E.cuenta?.lineas.length) return abrirDividir(origenId); };
+  $('#modal-caja').onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.m === 'cerrar') return cerrarModal();
+    if (b.dataset.modo) { modo = E.modoDividir = b.dataset.modo; return pintar(); }
+    if (b.dataset.p) { personas = Math.max(2, Math.min(30, personas + Number(b.dataset.p))); return pintar(); }
+    if (b.dataset.pasar) { const l = c.lineas.find(x => x.id === Number(b.dataset.pasar)); const n = sel.get(l.id) ?? 0;
+      sel.set(l.id, l.por_peso ? l.unidades : Math.min(l.unidades, Math.round((n + Math.min(1, l.unidades - n)) * 1000) / 1000)); return pintar(); }
+    if (b.dataset.devolver) { const id = Number(b.dataset.devolver); const l = c.lineas.find(x => x.id === id); const n = Math.round(((sel.get(id) ?? 0) - (l.por_peso ? l.unidades : 1)) * 1000) / 1000;
+      n > 0 ? sel.set(id, n) : sel.delete(id); return pintar(); }
+    if (b.dataset.m === 'personas') { cerrarModal(); E.cuenta = c; return abrirCobro({ partes: personas }); }
+    if (b.dataset.m === 'resto') {
+      cerrarModal();
+      E.cuenta = c;
+      // Lo que esté en el ticket nuevo sin cobrar se queda en la principal.
+      return abrirCobro({ despues: null });
+    }
+    if (b.dataset.m === 'parte') {
+      const r = await api('POST', `/cuentas/${origenId}/traspasar`, { nueva: true, nombre: `${c.mesa_nombre || c.nombre || 'Cuenta'} · parte`, lineas: [...sel].map(([id, unidades]) => ({ id, unidades })) });
+      cerrarModal();
+      E.cuenta = r.destino;
+      // Si se cancela el cobro de la parte, sus artículos vuelven a la cuenta principal.
+      return abrirCobro({
+        alCancelar: async () => { await api('POST', `/cuentas/${r.destino.id}/traspasar`, { cuenta_id: origenId }); await volver(); },
+        despues: volver,
+      });
+    }
+  });
+}
+
+// ---------- Diseño de salas ----------
+const PLANTILLAS_MESA = [
+  ['Cuadrada 2', 'cuadrada', 2, 80, 80], ['Cuadrada 4', 'cuadrada', 4, 110, 110], ['Rectangular 6', 'rectangular', 6, 190, 105],
+  ['Rectangular 8', 'rectangular', 8, 240, 110], ['Redonda 2', 'redonda', 2, 80, 80], ['Redonda 4', 'redonda', 4, 115, 115], ['Redonda 6', 'redonda', 6, 145, 145],
+];
+const COLORES_SALA = ['#ffffff', '#f4f6f8', '#f3ead8', '#e8dcc8', '#e6efe3', '#e3edff', '#f6e3e1', '#d9dee5'];
+
+async function pintarDiseno() {
+  const zonasMesas = E.datos.zonas.filter(z => z.tipo === 'mesas');
+  if (!zonasMesas.length) { $('#vista').innerHTML = `<div class="config">${cabeceraConfig('Diseño de salas')}<div class="vacio">Crea primero una zona de tipo "Mesas" en Zonas.</div></div>`;
+    $('#vista').onclick = e => { if (e.target.closest('[data-volver]')) ir(E.volverA || 'config'); }; return; }
+  if (!zonasMesas.some(z => z.id === E.zonaDiseno)) E.zonaDiseno = zonasMesas[0].id;
+  const p = await api('GET', `/zonas/${E.zonaDiseno}/plano`);
+  const D = { zona: p.zona, color: p.zona.color_fondo || '#ffffff', mesas: colocar(p.mesas.map(m => ({ ...m }))), objetos: p.objetos.map(o => ({ ...o })), sel: null, cambios: false };
+  E.diseno = D;
+  const elegido = () => D.sel ? (D.sel.t === 'm' ? D.mesas : D.objetos)[D.sel.i] : null;
+  const siguienteNombre = () => (String(D.mesas.at(-1)?.nombre ?? '').match(/^\D*/)?.[0] ?? '') + (Math.max(0, ...D.mesas.map(m => parseInt(String(m.nombre).replace(/\D/g, '')) || 0)) + 1);
+  const pintar = () => {
+    const x = elegido();
+    const H = altoLienzo(D.mesas, D.objetos);
+    $('#vista').innerHTML = `<div class="diseno">
+      <div class="diseno-cab">${cabeceraConfig('Diseño de salas')}
+        <div class="pestanas">${zonasMesas.map(z => `<button data-zona-d="${z.id}" class="${z.id === D.zona.id ? 'activa' : ''}">${esc(z.nombre)}</button>`).join('')}</div>
+        <div class="diseno-guardar"><button class="primario" data-d="guardar" ${D.cambios ? '' : 'disabled'}>Guardar</button><button data-d="deshacer" ${D.cambios ? '' : 'disabled'}>Descartar cambios</button></div>
+      </div>
+      <div class="diseno-cuerpo">
+        <aside class="diseno-panel">
+          <h4>Fondo de la sala</h4>
+          <div class="muestras">${COLORES_SALA.map(c => `<button data-color="${c}" style="background:${c}" class="${D.color === c ? 'activa' : ''}"></button>`).join('')}<label class="otro-color" title="Otro color"><input type="color" data-color-libre value="${esc(D.color)}"></label></div>
+          <h4>Añadir mesa</h4>
+          <div class="paleta">${PLANTILLAS_MESA.map(([t, f, n, w, h], i) => `<button data-plantilla="${i}"><span class="mini-mesa">${svgMesa({ forma: f, plazas: n, ancho: w, alto: h })}</span>${t}</button>`).join('')}</div>
+          <h4>Añadir objeto</h4>
+          <div class="paleta">${Object.entries(OBJETOS_SALA).map(([k, o]) => `<button data-objeto="${k}"><span class="mini-mesa">${svgObjeto({ tipo: k, ancho: o.w, alto: o.h })}</span>${o.nombre}</button>`).join('')}</div>
+        </aside>
+        <div class="diseno-lienzo">
+          <div class="lienzo editable" id="lienzo" style="aspect-ratio:1000/${H};background:${esc(D.color)}">
+            ${D.objetos.map((o, i) => `<div class="obj obj-${o.tipo} ${D.sel?.t === 'o' && D.sel.i === i ? 'sel' : ''}" data-el="o${i}" style="${caja(o, H)}">${svgObjeto(o)}${D.sel?.t === 'o' && D.sel.i === i ? '<i class="tirador" data-tirador="1"></i>' : ''}</div>`).join('')}
+            ${D.mesas.map((m, i) => `<div class="mesa-plano libre ${D.sel?.t === 'm' && D.sel.i === i ? 'sel' : ''}" data-el="m${i}" style="${caja(m, H)}">${svgMesa(m)}<span class="mesa-txt"><b>${esc(m.nombre)}</b><small>${m.plazas} p.</small></span>${D.sel?.t === 'm' && D.sel.i === i ? '<i class="tirador" data-tirador="1"></i>' : ''}</div>`).join('')}
+          </div>
+          <small class="tenue">Arrastra para mover; el cuadradito azul de la esquina cambia el tamaño.</small>
+        </div>
+        <aside class="diseno-panel">
+          ${x ? (D.sel.t === 'm' ? `<h4>Mesa</h4>
+              <label>Nombre<input data-campo="nombre" value="${esc(x.nombre)}"></label>
+              <label>Forma<select data-campo="forma">${OPCIONES.formamesa.map(([v, t]) => `<option value="${v}" ${x.forma === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+              <div class="fila-ctrl"><span>Comensales</span><button data-d="plazas-">−</button><b>${x.plazas}</b><button data-d="plazas+">+</button></div>`
+            : `<h4>${OBJETOS_SALA[x.tipo].nombre}</h4>`) + `
+              <div class="fila-ctrl"><span>Tamaño</span><button data-d="menor">−</button><button data-d="mayor">+</button></div>
+              <button data-d="girar">↻ Girar (horizontal / vertical)</button>
+              <button data-d="duplicar">Duplicar</button>
+              <button class="peligro" data-d="quitar">Quitar</button>`
+            : '<p class="tenue">Toca una mesa u objeto para cambiarlo. Añade mesas y objetos desde la izquierda.</p>'}
+          <p class="tenue" style="margin-top:14px">${D.mesas.length} mesas · ${D.mesas.reduce((n, m) => n + m.plazas, 0)} comensales</p>
+        </aside>
+      </div></div>`;
+  };
+  const cambio = () => { D.cambios = true; };
+  const anadir = (t, el) => { const n = (t === 'm' ? D.mesas : D.objetos); n.push(el); D.sel = { t, i: n.length - 1 }; cambio(); pintar(); };
+  pintar();
+  const v = $('#vista');
+  v.onclick = e => intentar(async () => {
+    const b = e.target.closest('button');
+    if (e.target.closest('[data-volver]')) {
+      if (D.cambios && !confirm('Hay cambios sin guardar. ¿Salir sin guardar?')) return;
+      return ir(E.volverA || 'config');
+    }
+    if (!b) return;
+    if (b.dataset.zonaD) {
+      if (D.cambios && !confirm('Hay cambios sin guardar. ¿Cambiar de zona sin guardar?')) return;
+      E.zonaDiseno = Number(b.dataset.zonaD); return pintarDiseno();
+    }
+    if (b.dataset.color) { D.color = b.dataset.color; cambio(); return pintar(); }
+    if (b.dataset.plantilla) {
+      const [, forma, plazas, ancho, alto] = PLANTILLAS_MESA[Number(b.dataset.plantilla)];
+      const k = D.mesas.length % 8;
+      return anadir('m', { nombre: siguienteNombre(), forma, plazas, ancho, alto, px: 40 + k * 20, py: 40 + k * 20 });
+    }
+    // Los objetos nuevos aparecen abajo, donde suele haber sitio libre, para no quedar debajo de una mesa.
+    if (b.dataset.objeto) { const o = OBJETOS_SALA[b.dataset.objeto]; const H = altoLienzo(D.mesas, D.objetos); const k = D.objetos.length % 6;
+      return anadir('o', { tipo: b.dataset.objeto, ancho: o.w, alto: o.h, px: 380 + k * 30, py: Math.max(0, H - o.h - 40 - k * 20) }); }
+    const x = elegido();
+    switch (b.dataset.d) {
+      case 'guardar': {
+        const r = await api('PUT', `/zonas/${D.zona.id}/plano`, { color_fondo: D.color, mesas: D.mesas, objetos: D.objetos });
+        await cargarDatos();
+        aviso(`Sala guardada: ${r.mesas.length} mesas`);
+        return pintarDiseno();
+      }
+      case 'deshacer': return pintarDiseno();
+      case 'plazas-': x.plazas = Math.max(1, x.plazas - 1); break;
+      case 'plazas+': x.plazas = Math.min(20, x.plazas + 1); break;
+      case 'menor': case 'mayor': {
+        const f = b.dataset.d === 'mayor' ? 1.12 : 1 / 1.12;
+        x.ancho = Math.max(D.sel.t === 'm' ? 50 : 10, Math.min(600, Math.round(x.ancho * f)));
+        x.alto = Math.max(D.sel.t === 'm' ? 50 : 10, Math.min(600, Math.round(x.alto * f)));
+        break;
+      }
+      case 'girar': [x.ancho, x.alto] = [x.alto, x.ancho]; break;
+      case 'duplicar': return anadir(D.sel.t, { ...x, id: undefined, nombre: D.sel.t === 'm' ? siguienteNombre() : undefined, px: Math.min(980, x.px + 25), py: x.py + 25 });
+      case 'quitar': (D.sel.t === 'm' ? D.mesas : D.objetos).splice(D.sel.i, 1); D.sel = null; break;
+      default: return;
+    }
+    cambio(); pintar();
+  });
+  v.onchange = e => {
+    const x = elegido();
+    if (e.target.dataset.colorLibre !== undefined) { D.color = e.target.value; cambio(); return pintar(); }
+    if (x && e.target.dataset.campo) { x[e.target.dataset.campo] = e.target.value; if (e.target.dataset.campo === 'forma' && x.forma === 'redonda') x.alto = x.ancho; cambio(); pintar(); }
+  };
+  // Arrastrar para mover y el tirador de la esquina para cambiar el tamaño (en unidades del lienzo, con imán de 5).
+  v.onpointerdown = e => {
+    const el = e.target.closest('[data-el]');
+    if (!el || !e.target.closest('#lienzo')) return;
+    const t = el.dataset.el[0], i = Number(el.dataset.el.slice(1));
+    const x = (t === 'm' ? D.mesas : D.objetos)[i];
+    const tirador = !!e.target.closest('[data-tirador]');
+    const lienzo = $('#lienzo'), u = lienzo.clientWidth / 1000;
+    const H = altoLienzo(D.mesas, D.objetos);
+    const ini = { cx: e.clientX, cy: e.clientY, px: x.px, py: x.py, w: x.ancho, h: x.alto };
+    let movido = false;
+    if (!(D.sel?.t === t && D.sel.i === i)) { D.sel = { t, i }; pintar(); }
+    const nodo = () => $(`#lienzo [data-el="${t}${i}"]`);
+    const imán = n => Math.round(n / 5) * 5;
+    const mover = ev => {
+      const dx = (ev.clientX - ini.cx) / u, dy = (ev.clientY - ini.cy) / u;
+      if (!movido && Math.abs(dx) + Math.abs(dy) < 3) return;
+      movido = true;
+      if (tirador) {
+        x.ancho = Math.max(t === 'm' ? 50 : 10, imán(ini.w + dx));
+        x.alto = x.forma === 'redonda' ? x.ancho : Math.max(t === 'm' ? 50 : 10, imán(ini.h + dy));
+      } else {
+        x.px = Math.max(0, Math.min(1000 - x.ancho, imán(ini.px + dx)));
+        x.py = Math.max(0, imán(ini.py + dy));
+      }
+      const n = nodo();
+      if (n) { n.style.cssText = caja(x, H); if (tirador && t === 'm') n.querySelector('svg').outerHTML = svgMesa(x); }
+    };
+    const soltar = () => { window.removeEventListener('pointermove', mover); window.removeEventListener('pointerup', soltar); if (movido) { cambio(); pintar(); } };
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', soltar);
+    e.preventDefault();
+  };
 }
