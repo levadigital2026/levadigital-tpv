@@ -836,7 +836,9 @@ test('comandas: al guardar sale solo lo nuevo en su impresora; manual solo con E
     const fam = (await api('POST', '/gestion/familias', { nombre: 'Raciones', impresoras: `${cocina.id}` })).data;
     const rabas = (await api('POST', '/gestion/articulos', { nombre: 'Rabas', precio: 1200, familia_id: fam.id })).data;
     const cana = (await api('POST', '/gestion/articulos', { nombre: 'Caña', precio: 250, familia_id: fam.id, impresoras: `${bar.id}` })).data;
-    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    const comedor = ini.zonas.find((z: any) => z.tipo === 'mesas');
+    const c = (await api('POST', '/cuentas', { zona_id: comedor.id, mesa_id: ini.mesas.find((m: any) => m.zona_id === comedor.id).id })).data;
+    void barra;
     await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: rabas.id, unidades: 2 });
     await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: cana.id });
     let r = (await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'auto' })).data;
@@ -867,5 +869,34 @@ test('comandas: al guardar sale solo lo nuevo en su impresora; manual solo con E
     r = (await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'auto' })).data;
     assert.equal(r.enviadas[0].ok, false);
     assert.equal((await api('GET', `/cuentas/${c.id}/comanda/pendiente`)).data[0].lineas.length, 1);
+  } finally { await cerrar(); srv.close(); }
+});
+
+test('comandas: la barra no imprime salvo impresora con "imprimir barra"; al pasar a mesa sale', async () => {
+  const { api, cerrar } = await arrancar();
+  const recibido: string[] = [];
+  const srv = createServer(s => { let d = ''; s.setEncoding('latin1'); s.on('data', x => d += x); s.on('end', () => recibido.push(d)); });
+  await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
+  const puerto = (srv.address() as AddressInfo).port;
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const barra = ini.zonas.find((z: any) => z.tipo === 'barra');
+    const comedor = ini.zonas.find((z: any) => z.tipo === 'mesas');
+    const mesa = ini.mesas.find((m: any) => m.zona_id === comedor.id);
+    const cocina = (await api('POST', '/gestion/impresoras', { nombre: 'Cocina', uso: 'cocina', ip: '127.0.0.1', puerto })).data;
+    assert.equal(cocina.imprimir_barra, 0);
+    const fam = (await api('POST', '/gestion/familias', { nombre: 'Raciones', impresoras: `${cocina.id}` })).data;
+    const rabas = (await api('POST', '/gestion/articulos', { nombre: 'Rabas', precio: 1200, familia_id: fam.id })).data;
+    const c = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${c.id}/lineas`, { articulo_id: rabas.id });
+    assert.equal((await api('POST', `/cuentas/${c.id}/comanda/enviar`, { modo: 'auto' })).data.enviadas.length, 0);
+    // Se guarda en barra y luego se pasa a una mesa: ahora sí sale.
+    const r = (await api('POST', `/cuentas/${c.id}/traspasar`, { mesa_id: mesa.id })).data;
+    assert.equal((await api('POST', `/cuentas/${r.destino.id}/comanda/enviar`, { modo: 'auto' })).data.enviadas.length, 1);
+    // Con "imprimir barra" marcado, la barra también sale.
+    await api('PUT', `/gestion/impresoras/${cocina.id}`, { imprimir_barra: true });
+    const c2 = (await api('POST', '/cuentas', { zona_id: barra.id })).data;
+    await api('POST', `/cuentas/${c2.id}/lineas`, { articulo_id: rabas.id });
+    assert.equal((await api('POST', `/cuentas/${c2.id}/comanda/enviar`, { modo: 'auto' })).data.enviadas.length, 1);
   } finally { await cerrar(); srv.close(); }
 });

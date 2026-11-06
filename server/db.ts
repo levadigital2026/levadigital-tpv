@@ -449,6 +449,7 @@ function migrar(db: DB) {
   anadirColumna(db, 'ticket_lineas', 'invitacion', 'INTEGER NOT NULL DEFAULT 0');
   // Plano de las zonas: color de fondo y mesas con forma, plazas, posición y tamaño (en un lienzo de 1000 de ancho).
   anadirColumna(db, 'impresoras', 'envio', "TEXT NOT NULL DEFAULT 'auto'");
+  anadirColumna(db, 'impresoras', 'imprimir_barra', 'INTEGER NOT NULL DEFAULT 0');
   anadirColumna(db, 'zonas', 'color_fondo', "TEXT NOT NULL DEFAULT ''");
   anadirColumna(db, 'mesas', 'forma', "TEXT NOT NULL DEFAULT 'cuadrada'");
   anadirColumna(db, 'mesas', 'plazas', 'INTEGER NOT NULL DEFAULT 4');

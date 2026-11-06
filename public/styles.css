@@ -572,3 +572,6 @@ b.invitacion { color: #2a9d8f; font-size: 13px; text-transform: uppercase; lette
   .traspaso, .dividir { grid-template-columns: 1fr; }
   .diseno-cuerpo { grid-template-columns: 1fr; }
 }
+.guardar-cuenta input { font-size: 18px; padding: 12px; }
+.botones-guardar { display: grid; gap: 8px; }
+.botones-guardar button { padding: 14px; font-size: 16px; font-weight: 700; }

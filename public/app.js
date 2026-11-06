@@ -186,7 +186,9 @@ $('#menu').addEventListener('click', e => {
   }
   E.volverA = null;
   E.modoMesas = null;
-  if (E.vista === 'venta' && b.dataset.vista !== 'venta') comandaAutomatica(E.cuenta);
+  if (E.vista === 'venta') comandaAutomatica(E.cuenta);
+  // "Venta" siempre empieza limpia: lo de las mesas ya está guardado y se abre desde Mesas.
+  if (b.dataset.vista === 'venta') { E.cuenta = null; E.lineaSel = null; E.calc = ''; }
   if (b.dataset.vista === 'clientes') { E.eligiendoCliente = false; E.fichaCliente = null; E.volverCobro = false; }
   if (b.dataset.vista === 'stocks') E.tabStocks = E.tabStocks === 'nuevo_albaran' ? 'nuevo_albaran' : 'existencias';
   intentar(() => ir(b.dataset.vista));
@@ -458,11 +460,37 @@ $('#vista').addEventListener('pointercancel', soltar);
 async function guardarCuenta() {
   const c = E.cuenta;
   if (!c) return;
-  if (!c.mesa_id && !c.nombre && c.lineas.length) {
-    const nombre = prompt('Nombre para encontrar la cuenta (ej.: barba, esquina)', '');
-    if (nombre === null) return;
-    if (nombre.trim()) await api('PATCH', `/cuentas/${c.id}`, { nombre: nombre.trim() });
+  // En barra se pide un nombre (no obligatorio) y se puede pasar a una mesa libre.
+  if (!c.mesa_id && c.lineas.length) {
+    abrirModal(`<h2><span>Guardar cuenta</span><button data-m="cerrar">✕</button></h2>
+      <form class="form guardar-cuenta">
+        <label>Nombre para encontrar la cuenta (no es obligatorio)<input name="nombre" value="${esc(c.nombre ?? '')}" placeholder="barba, esquina, gorra roja..." autocomplete="off"></label>
+        <div class="botones-guardar">
+          <button type="submit" class="primario">Guardar cuenta</button>
+          <button type="button" data-m="mesa">Traspasar a mesa</button>
+          <button type="button" data-m="cerrar">Cancelar</button>
+        </div>
+      </form>`);
+    setTimeout(() => $('#modal-caja [name=nombre]')?.focus(), 30);
+    const nombre = async () => { const n = $('#modal-caja [name=nombre]').value.trim(); if (n !== (c.nombre ?? '')) await api('PATCH', `/cuentas/${c.id}`, { nombre: n }); };
+    $('#modal-caja form').onsubmit = ev => { ev.preventDefault(); intentar(async () => { await nombre(); cerrarModal(); return cuentaGuardada(c); }); };
+    $('#modal-caja').onclick = ev => intentar(async () => {
+      const b = ev.target.closest('button');
+      if (b?.dataset.m === 'cerrar') return cerrarModal();
+      if (b?.dataset.m === 'mesa') {
+        await nombre();
+        cerrarModal();
+        E.modoMesas = 'destino'; E.traspasoOrigen = c.id;
+        E.cuenta = null; E.lineaSel = null;
+        if (!E.datos.zonas.some(z => z.id === E.zonaMesas && z.tipo === 'mesas')) E.zonaMesas = E.datos.zonas.find(z => z.tipo === 'mesas')?.id;
+        return ir('mesas');
+      }
+    });
+    return;
   }
+  return cuentaGuardada(c);
+}
+function cuentaGuardada(c) {
   E.cuenta = null;
   E.lineaSel = null;
   aviso('Cuenta guardada');
@@ -663,6 +691,7 @@ function abrirCobro(opc = {}) {
   const terminar = async () => {
     if (op.email && !op.para.trim()) { pagos.pop(); pintar(); return aviso('Escribe el correo al que se envía el ticket', true); }
     try {
+      await comandaAutomatica(c);
       const ticket = await api('POST', `/cuentas/${c.id}/cobrar`, { pagos: pagos.map(p => ({ forma_cobro_id: p.forma_cobro_id, importe: p.importe })) });
       E.cuenta = null;
       E.lineaSel = null;
@@ -884,6 +913,7 @@ async function pintarMesas() {
   const zona = zonas.find(z => z.id === E.zonaMesas);
   const abiertaDe = m => E.abiertas.find(a => a.mesa_id === m.id);
   const traspaso = E.modoMesas === 'traspasar';
+  const destino = E.modoMesas === 'destino';
   let cuerpo;
   if (zona?.tipo === 'mesas') {
     const mesas = colocar(E.datos.mesas.filter(m => m.zona_id === zona.id).map(m => ({ ...m })));
@@ -899,12 +929,23 @@ async function pintarMesas() {
   }
   $('#vista').innerHTML = `<div class="mesas">
     ${traspaso ? '<div class="banda-asignar">Traspasar: toca la mesa (o la cuenta) de <b>origen</b>. <button data-cancelar-traspaso="1">Cancelar</button></div>' : ''}
+    ${destino ? '<div class="banda-asignar">Traspasar la cuenta de barra: toca la <b>mesa de destino</b> (si está ocupada, se juntan). <button data-cancelar-traspaso="1">Cancelar</button></div>' : ''}
     <div class="pestanas">${zonas.map(z => `<button data-zona="${z.id}" class="${z.id === E.zonaMesas ? 'activa' : ''}">${esc(z.nombre)}</button>`).join('')}</div>
     ${cuerpo}</div>`;
   $('#vista').onclick = e => intentar(async () => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.cancelarTraspaso) { E.modoMesas = null; return pintarMesas(); }
+    if (destino && b.dataset.mesa) {
+      const mesa = E.datos.mesas.find(m => m.id === Number(b.dataset.mesa));
+      if (abiertaDe(mesa) && !confirm(`${mesa.nombre} ya tiene cuenta. ¿Juntar las dos?`)) return;
+      const r = await api('POST', `/cuentas/${E.traspasoOrigen}/traspasar`, { mesa_id: mesa.id });
+      E.modoMesas = null; E.traspasoOrigen = null;
+      aviso(`Traspasado a ${mesa.nombre}`);
+      await comandaAutomatica(r.destino);
+      return pintarMesas();
+    }
+    if (destino) return;
     if (b.dataset.zona) { E.zonaMesas = Number(b.dataset.zona); return pintarMesas(); }
     if (traspaso) {
       const id = b.dataset.mesa ? abiertaDe(E.datos.mesas.find(m => m.id === Number(b.dataset.mesa)))?.id : Number(b.dataset.abrir);
@@ -1111,7 +1152,7 @@ const GESTION = {
     ['smtp_servidor', 'Correo · Servidor SMTP'], ['smtp_puerto', 'Correo · Puerto SMTP', 'num'], ['smtp_cifrado', 'Correo · Cifrado', 'cifrado'], ['smtp_usuario', 'Correo · Usuario'], ['smtp_clave', 'Correo · Contraseña', 'clave'],
     ['email_emisor', 'Correo · Email emisor'], ['email_asunto', 'Correo · Asunto (vacío = automático)'], ['email_encabezado', 'Correo · Texto de encabezado'], ['email_pie', 'Correo · Texto de pie'],
     ['mail_en_cierre', 'Enviar el cierre de caja por correo', 'bool'], ['email_cierre', 'Correo · Destinatarios del cierre (separados por ;)']] },
-  impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['envio', 'Envío de comandas', 'envio'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
+  impresoras: { titulo: 'Impresoras de cocina y tickets', campos: [['nombre', 'Nombre'], ['ip', 'Dirección IP'], ['puerto', 'Puerto', 'num'], ['uso', 'Uso', 'usoimpresora'], ['envio', 'Envío de comandas', 'envio'], ['imprimir_barra', 'Imprimir también las cuentas de barra', 'boolno'], ['departamento_id', 'Departamento', 'departamentos'], ['activa', 'Activa', 'bool'], ['orden', 'Orden', 'num']] },
   comentarios: { titulo: 'Comentarios de comanda', campos: [['texto', 'Comentario'], ['familia_id', 'Solo familia', 'familias'], ['articulo_id', 'Solo artículo', 'articulos'], ['orden', 'Orden', 'num']] },
   conceptos_pago: { titulo: 'Conceptos de pago', campos: [['nombre', 'Nombre'], ['orden', 'Orden', 'num']] },
   botones: { titulo: 'Botonera', campos: [['texto', 'Texto'], ['accion', 'Acción', 'accion'], ['color', 'Color', 'colorop'], ['orden', 'Orden', 'num'], ['visible', 'Visible', 'bool']] },
@@ -1130,7 +1171,7 @@ const REFS = ['familias', 'departamentos', 'zonas', 'impresoras', 'articulos', '
 
 function valorCelda(tipo, v) {
   if (tipo === 'euros') return euros(v);
-  if (tipo === 'bool') return v ? 'Sí' : 'No';
+  if (tipo === 'bool' || tipo === 'boolno') return v ? 'Sí' : 'No';
   if (tipo === 'grupo') return GRUPOS.find(g => g[0] === v)?.[1] ?? '';
   if (OPCIONES[tipo]) return OPCIONES[tipo].find(o => o[0] === v)?.[1] ?? v;
   if (REFS.includes(tipo)) return E.datos[tipo].find(x => x.id === v)?.nombre ?? '';
@@ -1153,6 +1194,7 @@ const LISTAS = { permisos: () => E.datos.permisos, secciones: () => E.datos.secc
 
 function campoForm([k, etiqueta, tipo], fila) {
   const v = fila?.[k];
+  if (tipo === 'boolno') return `<label><span>${etiqueta}</span><select name="${k}"><option value="0" ${v !== 1 ? 'selected' : ''}>No</option><option value="1" ${v === 1 ? 'selected' : ''}>Sí</option></select></label>`;
   if (tipo === 'bool') return `<label><span>${etiqueta}</span><select name="${k}"><option value="1" ${v !== 0 ? 'selected' : ''}>Sí</option><option value="0" ${v === 0 ? 'selected' : ''}>No</option></select></label>`;
   if (tipo === 'clave') return `<label>${etiqueta}<input name="${k}" type="password" inputmode="numeric" autocomplete="new-password" value="${esc(v ?? '')}"></label>`;
   if (tipo === 'rfid') return `<label>${etiqueta}<input name="${k}" value="${esc(v ?? '')}" placeholder="Toca aquí y pasa la pulsera por el lector" autocomplete="off" onkeydown="if(event.key==='Enter')event.preventDefault()"></label>`;
@@ -1264,7 +1306,7 @@ async function pintarGestion(editar) {
     for (const [k, , tipo] of def.campos) {
       const v = form.elements[k].value;
       if (tipo === 'euros') datos[k] = Math.round(Number(v.replace(',', '.')) * 100);
-      else if (['num', 'grupo', 'bool'].includes(tipo)) datos[k] = Number(String(v).replace(',', '.'));
+      else if (['num', 'grupo', 'bool', 'boolno'].includes(tipo)) datos[k] = Number(String(v).replace(',', '.'));
       else if (REFS.includes(tipo)) datos[k] = v === '' ? null : Number(v);
       else datos[k] = v;
     }
@@ -2565,6 +2607,7 @@ async function abrirTraspaso(origenId) {
       cerrarModal();
       E.cuenta = r.destino; E.lineaSel = null;
       aviso(`Traspasado a ${nombre}`);
+      comandaAutomatica(r.destino);
       return ir('venta');
     }
   });

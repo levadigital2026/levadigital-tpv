@@ -85,7 +85,11 @@ export async function enviarComanda(db: DB, cuentaId: number, modo: 'auto' | 'en
   const cuenta = nombreParaCocina(db, cuentaId);
   const operario = contexto.operario?.nombre ?? '';
   let grupos = repartir(db, cuentaId, modo === 'reenviar');
-  if (modo === 'auto') grupos = grupos.filter(g => g.imp.envio !== 'manual');
+  // Lo de barra se cobra al momento: solo sale en las impresoras que tienen marcado "imprimir también barra".
+  // Lo que no sale queda pendiente: si la cuenta se traspasa a una mesa, sale entonces.
+  const c = db.prepare('SELECT c.mesa_id, z.tipo FROM cuentas c JOIN zonas z ON z.id = c.zona_id WHERE c.id = ?').get(cuentaId) as Row;
+  const esBarra = !c.mesa_id || c.tipo === 'barra';
+  if (modo === 'auto') grupos = grupos.filter(g => g.imp.envio !== 'manual' && (!esBarra || g.imp.imprimir_barra));
   const resultado: { impresora: string; lineas: number; ok: boolean; error?: string }[] = [];
   for (const g of grupos) {
     try {

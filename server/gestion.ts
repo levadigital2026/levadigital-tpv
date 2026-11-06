@@ -62,7 +62,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   impresoras: {
     nombre: { tipo: 'texto', obligatorio: true }, ip: { tipo: 'texto' }, puerto: { tipo: 'entero' },
     uso: { tipo: 'texto', valores: ['tickets', 'cocina', 'barra', 'otro'] }, departamento_id: { tipo: 'ref' },
-    envio: { tipo: 'texto', valores: ['auto', 'manual'] },
+    envio: { tipo: 'texto', valores: ['auto', 'manual'] }, imprimir_barra: { tipo: 'bool' },
     activa: { tipo: 'bool' }, orden: { tipo: 'entero' },
   },
   conceptos_pago: { nombre: { tipo: 'texto', obligatorio: true }, orden: { tipo: 'entero' } },
