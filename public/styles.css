@@ -617,3 +617,15 @@ b.invitacion { color: #2a9d8f; font-size: 13px; text-transform: uppercase; lette
 .modal h2 .nav-ticket { display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 10px; }
 .nav-ticket button { width: 44px; height: 36px; padding: 0; font-size: 16px; }
 .nav-ticket small { font-size: 13px; font-weight: 500; min-width: 64px; text-align: center; color: var(--suave, #667); }
+/* Colores de fondo y letras de cada zona de la pantalla de venta (Configuración > Aspecto) */
+.venta .panel.cuenta { background: var(--a-cuenta_fondo, var(--panel)); color: var(--a-cuenta_texto, var(--tinta)); }
+.venta .panel.familias { background: var(--a-familias_fondo, var(--panel)); color: var(--a-familias_texto, var(--tinta)); }
+.venta .panel.articulos { background: var(--a-articulos_fondo, var(--panel)); color: var(--a-articulos_texto, var(--tinta)); }
+.venta .panel.mando { background: var(--a-botonera_fondo, var(--panel)); color: var(--a-botonera_texto, var(--tinta)); }
+.venta .panel.cuenta .teclado { background: var(--a-cuenta_fondo, var(--panel)); }
+.venta .panel.cuenta small, .venta .panel .vacio { color: inherit; opacity: .7; }
+/* Los botones sin color propio siguen con su fondo blanco y letra oscura. */
+:where(.venta .panel) button { color: var(--tinta); }
+:where(.venta .panel.cuenta) .teclado .pantalla { color: var(--tinta); }
+:where(.venta .cuenta) .linea { background: var(--a-cuenta_fondo, var(--panel)); }
+.venta .cuenta .linea.sel { color: var(--tinta); }
