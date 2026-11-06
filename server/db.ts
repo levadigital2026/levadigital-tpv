@@ -544,6 +544,14 @@ function migrar(db: DB) {
       }
     });
     // Quien podía cobrar también puede abrir el cajón.
+    // Menús de arriba y tickets anteriores: los operarios que ya existían los conservan todos.
+    unaVez('permisos_menu', () => {
+      const nuevos = ['tickets_anteriores', 'menu_mesas', 'menu_tickets', 'menu_caja', 'menu_abiertas', 'menu_clientes', 'menu_stocks'];
+      for (const o of db.prepare('SELECT id, permisos FROM operarios').all() as { id: number; permisos: string }[]) {
+        const p = String(o.permisos).split(',').filter(Boolean);
+        db.prepare('UPDATE operarios SET permisos = ? WHERE id = ?').run([...p, ...nuevos.filter(n => !p.includes(n))].join(','), o.id);
+      }
+    });
     unaVez('permiso_abrir_cajon', () => {
       for (const o of db.prepare('SELECT id, permisos FROM operarios').all() as { id: number; permisos: string }[]) {
         const p = String(o.permisos).split(',').filter(Boolean);
@@ -617,6 +625,13 @@ export const PERMISOS: Record<string, string> = {
   ver_cuadre: 'Ver el cuadre de caja (cierre ciego)',
   invitar: 'Invitar (artículos a 0 €)',
   abrir_cajon: 'Abrir el cajón sin cobrar',
+  tickets_anteriores: 'Ver tickets anteriores (flechas en Último ticket)',
+  menu_mesas: 'Menú: Mesas',
+  menu_tickets: 'Menú: Tickets',
+  menu_caja: 'Menú: Caja',
+  menu_abiertas: 'Menú: Cuentas abiertas',
+  menu_clientes: 'Menú: Clientes',
+  menu_stocks: 'Menú: Stocks',
   configuracion: 'Entrar en configuración e informes',
 };
 

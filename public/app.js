@@ -169,6 +169,18 @@ function nombreCuenta(c) {
 const VISTAS = { venta: pintarVenta, mesas: pintarMesas, tickets: pintarTickets, caja: pintarCaja, gestion: () => pintarGestion(), config: pintarConfig, abiertas: pintarAbiertas, empresa: pintarEmpresa, borrados: pintarBorrados, registro: pintarRegistro, aspecto: pintarAspecto, empleados: pintarEmpleados, cierres: pintarCierres, clientes: () => pintarClientes(), stocks: () => pintarStocks(), modulos: pintarModulos, diseno: () => pintarDiseno() };
 // Pantallas que cuelgan de Configuración (el botón de herramientas del menú queda marcado).
 const VISTAS_CONFIG = new Set(['config', 'gestion', 'empresa', 'borrados', 'registro', 'aspecto', 'empleados', 'cierres', 'modulos', 'diseno']);
+// Menús de arriba: en un puesto con permisos, cada uno se ve solo si el operario tiene su permiso.
+const PERMISO_MENU = { mesas: 'menu_mesas', tickets: 'menu_tickets', caja: 'menu_caja', abiertas: 'menu_abiertas', clientes: 'menu_clientes', stocks: 'menu_stocks', config: 'configuracion' };
+function pintarMenu() {
+  if (!E.datos) return;
+  document.querySelectorAll('#menu button[data-vista]').forEach(b => {
+    const p = PERMISO_MENU[b.dataset.vista];
+    b.classList.toggle('oculto', !!p && !tienePermiso(p));
+  });
+  // Si la pantalla abierta ya no está permitida para este operario, se vuelve a Venta.
+  const actual = VISTAS_CONFIG.has(E.vista) ? 'config' : E.vista;
+  if (PERMISO_MENU[actual] && !tienePermiso(PERMISO_MENU[actual])) { E.cuenta = null; intentar(() => ir('venta')); }
+}
 function ir(vista) {
   E.vista = vista;
   // Los manejadores de una pantalla no deben seguir activos en otra.
@@ -184,6 +196,7 @@ $('#menu').addEventListener('click', e => {
     if (!tienePermiso('configuracion')) return aviso('Tu operario no tiene permiso para entrar en configuración', true);
     E.seccionConfig = null;
   }
+  if (PERMISO_MENU[b.dataset.vista] && !tienePermiso(PERMISO_MENU[b.dataset.vista])) return aviso('Tu operario no tiene permiso para este menú', true);
   E.volverA = null;
   E.modoMesas = null;
   if (E.vista === 'venta') comandaAutomatica(E.cuenta);
@@ -370,7 +383,9 @@ async function accion(a) {
     case 'ultimo_ticket': {
       const lista = await api('GET', '/tickets?todos=1');
       if (!lista.length) return aviso('Todavía no hay tickets', true);
-      return verTicket(await api('GET', `/tickets/${lista[0].id}`));
+      // Con permiso, unas flechas dejan ir a los tickets anteriores.
+      const nav = tienePermiso('tickets_anteriores') ? { ids: lista.map(x => x.id), i: 0 } : null;
+      return verTicket(await api('GET', `/tickets/${lista[0].id}`), nav);
     }
   }
 }
@@ -927,13 +942,22 @@ function htmlTicket(t, titulo) {
   </div>`;
 }
 
-function verTicket(t) {
-  abrirModal(`<h2><span>Ticket ${esc(t.serie)}-${t.numero}</span><button data-m="cerrar">✕</button></h2>
+function verTicket(t, nav = null) {
+  const flechas = nav && nav.ids.length > 1 ? `<span class="nav-ticket">
+      <button data-m="anterior" title="Ticket anterior" ${nav.i >= nav.ids.length - 1 ? 'disabled' : ''}>◀</button>
+      <small>${nav.i === 0 ? 'Último' : `${nav.i + 1} de ${nav.ids.length}`}</small>
+      <button data-m="siguiente" title="Ticket siguiente" ${nav.i <= 0 ? 'disabled' : ''}>▶</button></span>` : '';
+  abrirModal(`<h2><span>Ticket ${esc(t.serie)}-${t.numero}</span>${flechas}<button data-m="cerrar">✕</button></h2>
     ${htmlTicket(t, t.anula_ticket_id ? 'ANULACIÓN' : 'FACTURA SIMPLIFICADA')}
     <div class="botones"><button class="primario" data-m="imprimir">Imprimir</button><button data-m="a4">Imprimir A4</button><button data-m="email">Enviar por email</button><button data-m="cerrar">Cerrar</button></div>`);
   $('#modal-caja').onclick = e => intentar(async () => {
     const b = e.target.closest('button');
     if (b?.dataset.m === 'cerrar') cerrarModal();
+    if (nav && (b?.dataset.m === 'anterior' || b?.dataset.m === 'siguiente')) {
+      const i = nav.i + (b.dataset.m === 'anterior' ? 1 : -1);
+      if (i < 0 || i >= nav.ids.length) return;
+      return verTicket(await api('GET', `/tickets/${nav.ids[i]}`), { ...nav, i });
+    }
     if (b?.dataset.m === 'imprimir') window.print();
     if (b?.dataset.m === 'a4') verDocumentoA4(t, 'Factura simplificada', `/tickets/${t.id}/email`);
     if (b?.dataset.m === 'email') return enviarPorEmail(`/tickets/${t.id}/email`, t.cliente?.email);
@@ -1681,6 +1705,7 @@ function pintarOperarioActual() {
   }
   el.textContent = E.operario ? `👤 ${E.operario.nombre}` : '👤 Sin operario';
   el.classList.toggle('oculto', !E.datos?.operarios?.length);
+  pintarMenu();
 }
 // Tras cobrar o guardar: si el puesto pide operario en cada operación, se vuelve al panel.
 function trasOperacion() {

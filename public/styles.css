@@ -614,3 +614,6 @@ b.invitacion { color: #2a9d8f; font-size: 13px; text-transform: uppercase; lette
 .guardar-cuenta input { font-size: 18px; padding: 12px; }
 .botones-guardar { display: grid; gap: 8px; }
 .botones-guardar button { padding: 14px; font-size: 16px; font-weight: 700; }
+.modal h2 .nav-ticket { display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 10px; }
+.nav-ticket button { width: 44px; height: 36px; padding: 0; font-size: 16px; }
+.nav-ticket small { font-size: 13px; font-weight: 500; min-width: 64px; text-align: center; color: var(--suave, #667); }
