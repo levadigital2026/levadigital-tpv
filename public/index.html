@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#0b1527">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icono-192.png" type="image/png">
+  <link rel="stylesheet" href="/styles.css">
+  <title>TPV LevaDigital</title>
+</head>
+<body>
+  <header class="barra-sup">
+    <div class="marca"><img src="/icono-192.png" alt=""><span><span class="marca-leva">LEVA</span> <span class="marca-digital">DIGITAL</span><span class="marca-tpv">TPV</span></span></div>
+    <nav class="menu" id="menu">
+      <button data-vista="venta" class="activo">Venta</button>
+      <button data-vista="mesas">Mesas</button>
+      <button data-vista="tickets">Tickets</button>
+      <button data-vista="caja">Caja</button>
+      <button data-vista="abiertas">Cuentas abiertas <span class="contador" id="n-abiertas"></span></button>
+      <button data-vista="clientes">Clientes</button>
+      <button data-vista="stocks">Stocks</button>
+      <button data-vista="config" class="menu-config" title="Configuración" aria-label="Configuración"></button>
+    </nav>
+    <div class="estado"><span id="local"></span><span id="conexion" class="punto" title="Conexión con el servidor"></span><span id="reloj"></span></div>
+  </header>
+
+  <main id="vista"></main>
+
+  <div id="modal" class="modal oculto" role="dialog" aria-modal="true"><div class="modal-caja" id="modal-caja"></div></div>
+  <div id="aviso" class="aviso oculto" role="status"></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

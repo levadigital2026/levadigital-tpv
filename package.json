@@ -1,0 +1,12 @@
+{
+  "name": "levadigital-tpv",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TPV de hostelería de LevaDigital: servidor local en Windows y aplicación web para TPV, PDA y KDS.",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/main.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts"
+  }
+}

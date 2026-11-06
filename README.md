@@ -29,7 +29,7 @@ Queda para los siguientes pasos: CashDro, impresoras de red y KDS (paso 3); Tick
 npm start
 ```
 
-Abre `http://localhost:8080` en el propio PC. La consola muestra también la dirección para las PDA y tablets del local, por ejemplo `http://192.168.1.20:8080`.
+En Windows también puedes hacer doble clic en `Iniciar TPV.bat`. Abre `http://localhost:8080` en el propio PC. La consola muestra también la dirección para las PDA y tablets del local, por ejemplo `http://192.168.1.20:8080`.
 
 Opciones (variables de entorno):
 

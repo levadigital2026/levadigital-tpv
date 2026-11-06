@@ -1,0 +1,1194 @@
+{
+ "nota": "Carta de demostración (familias y artículos de un bar real, IVA 10%).",
+ "familias": [
+  {
+   "id": 1,
+   "nombre": "CAFES",
+   "color": "#6f4e37",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/cafe.svg",
+   "orden": 1
+  },
+  {
+   "id": 2,
+   "nombre": "CERVEZA",
+   "color": "#f2b53a",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/cana.svg",
+   "orden": 2
+  },
+  {
+   "id": 3,
+   "nombre": "REFRESCOS",
+   "color": "#e53935",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/cola.svg",
+   "orden": 3
+  },
+  {
+   "id": 4,
+   "nombre": "VINOS",
+   "color": "#8e1b3a",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/copa-tinto.svg",
+   "orden": 4
+  },
+  {
+   "id": 5,
+   "nombre": "BOTELLAS VINO",
+   "color": "#5a1428",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/botella-tinto.svg",
+   "orden": 5
+  },
+  {
+   "id": 6,
+   "nombre": "APERITIVOS",
+   "color": "#c62828",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/vermut.svg",
+   "orden": 6
+  },
+  {
+   "id": 7,
+   "nombre": "PINTXOS",
+   "color": "#e9c46a",
+   "departamento": "Cocina",
+   "orden_plato": "Entrantes",
+   "imagen": "Carta/pintxo.svg",
+   "orden": 7
+  },
+  {
+   "id": 8,
+   "nombre": "RACIONES",
+   "color": "#e76f51",
+   "departamento": "Cocina",
+   "orden_plato": "Entrantes",
+   "imagen": "Carta/calamares.svg",
+   "orden": 8
+  },
+  {
+   "id": 17,
+   "nombre": "PINTXOS BARRA",
+   "color": "#d4a017",
+   "departamento": "Barra",
+   "orden_plato": "Entrantes",
+   "imagen": "Carta/montadito.svg",
+   "orden": 9
+  },
+  {
+   "id": 18,
+   "nombre": "TXAKOLI Y SIDRA",
+   "color": "#2f6b3a",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/txakoli.svg",
+   "orden": 10
+  },
+  {
+   "id": 10,
+   "nombre": "ENSALADAS",
+   "color": "#7cb342",
+   "departamento": "Cocina",
+   "orden_plato": "Primeros",
+   "imagen": "Carta/ensalada.svg",
+   "orden": 11
+  },
+  {
+   "id": 11,
+   "nombre": "BOCADILLOS",
+   "color": "#d9822b",
+   "departamento": "Cocina",
+   "orden_plato": "Segundos",
+   "imagen": "Carta/bocadillo.svg",
+   "orden": 12
+  },
+  {
+   "id": 12,
+   "nombre": "HAMBURGUESAS",
+   "color": "#a0522d",
+   "departamento": "Cocina",
+   "orden_plato": "Segundos",
+   "imagen": "Carta/hamburguesa.svg",
+   "orden": 13
+  },
+  {
+   "id": 13,
+   "nombre": "PLATOS COMBINADOS",
+   "color": "#f28c28",
+   "departamento": "Cocina",
+   "orden_plato": "Segundos",
+   "imagen": "Carta/plato-combinado.svg",
+   "orden": 14
+  },
+  {
+   "id": 15,
+   "nombre": "CARNES",
+   "color": "#9c3d22",
+   "departamento": "Cocina",
+   "orden_plato": "Segundos",
+   "imagen": "Carta/carne.svg",
+   "orden": 15
+  },
+  {
+   "id": 14,
+   "nombre": "PESCADO",
+   "color": "#3d7ea6",
+   "departamento": "Cocina",
+   "orden_plato": "Segundos",
+   "imagen": "Carta/pescado.svg",
+   "orden": 16
+  },
+  {
+   "id": 16,
+   "nombre": "POSTRES",
+   "color": "#b5838d",
+   "departamento": "Cocina",
+   "orden_plato": "Postres",
+   "imagen": "Carta/tarta-queso.svg",
+   "orden": 17
+  },
+  {
+   "id": 22,
+   "nombre": "GINEBRAS",
+   "color": "#4fa3c7",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/gin-tonic.svg",
+   "orden": 18
+  },
+  {
+   "id": 20,
+   "nombre": "RONES",
+   "color": "#8d5524",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/ron-cola.svg",
+   "orden": 19
+  },
+  {
+   "id": 21,
+   "nombre": "WHISKY",
+   "color": "#c8761a",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/whisky.svg",
+   "orden": 20
+  },
+  {
+   "id": 23,
+   "nombre": "LICORES COGNAC",
+   "color": "#7b3f00",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/copa-licor.svg",
+   "orden": 21
+  },
+  {
+   "id": 9,
+   "nombre": "CARTA COMIDA",
+   "color": "#607d8b",
+   "departamento": "Cocina",
+   "orden_plato": "Segundos",
+   "imagen": "Carta/plato-combinado.svg",
+   "orden": 22
+  },
+  {
+   "id": 19,
+   "nombre": "ALCOHOL COMBINADOS",
+   "color": "#6a1b9a",
+   "departamento": "Barra",
+   "orden_plato": "Bebidas",
+   "imagen": "Carta/combinado.svg",
+   "orden": 23
+  }
+ ],
+ "articulos": [
+  {
+   "id": 1,
+   "nombre": "BOLA DE CARNE",
+   "precio": 270,
+   "familia_id": 7,
+   "imagen": "Carta/bola-carne.svg"
+  },
+  {
+   "id": 2,
+   "nombre": "MEJILLÓN RELLENO",
+   "precio": 250,
+   "familia_id": 7,
+   "imagen": "Carta/mejillon.svg"
+  },
+  {
+   "id": 3,
+   "nombre": "CROQUETA (BACALAO, JAMÓN)",
+   "precio": 250,
+   "familia_id": 7,
+   "imagen": "Carta/croqueta.svg"
+  },
+  {
+   "id": 4,
+   "nombre": "BROCHETA GAMBA",
+   "precio": 290,
+   "familia_id": 7,
+   "imagen": "Carta/brocheta.svg"
+  },
+  {
+   "id": 5,
+   "nombre": "BROCHETA GAMBA BACON",
+   "precio": 290,
+   "familia_id": 7,
+   "imagen": "Carta/brocheta-bacon.svg"
+  },
+  {
+   "id": 6,
+   "nombre": "CHORIZO A LA SIDRA",
+   "precio": 250,
+   "familia_id": 7,
+   "imagen": "Carta/chorizo.svg"
+  },
+  {
+   "id": 7,
+   "nombre": "TORREZNO DE SORIA",
+   "precio": 310,
+   "familia_id": 7,
+   "imagen": "Carta/torrezno.svg"
+  },
+  {
+   "id": 8,
+   "nombre": "CALAMARES CON ALI-OLI",
+   "precio": 1070,
+   "familia_id": 8,
+   "imagen": "Carta/calamares.svg"
+  },
+  {
+   "id": 9,
+   "nombre": "GAMBA GABARDINA (ALI-OLI)",
+   "precio": 750,
+   "familia_id": 8,
+   "imagen": "Carta/gambas.svg"
+  },
+  {
+   "id": 10,
+   "nombre": "PATATAS HORBEL",
+   "precio": 650,
+   "familia_id": 8,
+   "imagen": "Carta/patatas.svg"
+  },
+  {
+   "id": 11,
+   "nombre": "NACHOS CARNE PICADA",
+   "precio": 1300,
+   "familia_id": 8,
+   "imagen": "Carta/nachos.svg"
+  },
+  {
+   "id": 12,
+   "nombre": "ALITAS DE POLLO",
+   "precio": 1050,
+   "familia_id": 8,
+   "imagen": "Carta/alitas.svg"
+  },
+  {
+   "id": 13,
+   "nombre": "CRUJIENTE DE POLLO CON ALIÓLI",
+   "precio": 950,
+   "familia_id": 8,
+   "imagen": "Carta/alitas.svg"
+  },
+  {
+   "id": 14,
+   "nombre": "TABLA DE JAMÓN IBÉRICO",
+   "precio": 2000,
+   "familia_id": 8,
+   "imagen": "Carta/jamon.svg"
+  },
+  {
+   "id": 15,
+   "nombre": "TORTILLA DE BACALAO",
+   "precio": 810,
+   "familia_id": 8,
+   "imagen": "Carta/tortilla.svg"
+  },
+  {
+   "id": 16,
+   "nombre": "PULPO",
+   "precio": 1950,
+   "familia_id": 8,
+   "imagen": "Carta/pulpo.svg"
+  },
+  {
+   "id": 17,
+   "nombre": "CALAMARES",
+   "precio": 1070,
+   "familia_id": 8,
+   "imagen": "Carta/calamares.svg"
+  },
+  {
+   "id": 18,
+   "nombre": "PATA HORBEL",
+   "precio": 650,
+   "familia_id": 8,
+   "imagen": "Carta/patatas.svg"
+  },
+  {
+   "id": 19,
+   "nombre": "NACHOS",
+   "precio": 1300,
+   "familia_id": 8,
+   "imagen": "Carta/nachos.svg"
+  },
+  {
+   "id": 20,
+   "nombre": "ALITAS POLLO",
+   "precio": 1050,
+   "familia_id": 8,
+   "imagen": "Carta/alitas.svg"
+  },
+  {
+   "id": 21,
+   "nombre": "CRUJIENTE POLLO",
+   "precio": 950,
+   "familia_id": 8,
+   "imagen": "Carta/alitas.svg"
+  },
+  {
+   "id": 22,
+   "nombre": "TABLA JAMON IBERICO",
+   "precio": 2000,
+   "familia_id": 8,
+   "imagen": "Carta/jamon.svg"
+  },
+  {
+   "id": 23,
+   "nombre": "TORTILLA BACALAO",
+   "precio": 810,
+   "familia_id": 8,
+   "imagen": "Carta/tortilla.svg"
+  },
+  {
+   "id": 24,
+   "nombre": "PULPO",
+   "precio": 1950,
+   "familia_id": 8,
+   "imagen": "Carta/pulpo.svg"
+  },
+  {
+   "id": 25,
+   "nombre": "MIXTA",
+   "precio": 1150,
+   "familia_id": 10,
+   "imagen": "Carta/ensalada.svg"
+  },
+  {
+   "id": 26,
+   "nombre": "QUESO DE CABRA",
+   "precio": 1400,
+   "familia_id": 10,
+   "imagen": "Carta/ensalada.svg"
+  },
+  {
+   "id": 27,
+   "nombre": "CHIPIRONES",
+   "precio": 1390,
+   "familia_id": 10,
+   "imagen": "Carta/ensalada.svg"
+  },
+  {
+   "id": 28,
+   "nombre": "CESAR",
+   "precio": 1350,
+   "familia_id": 10,
+   "imagen": "Carta/ensalada.svg"
+  },
+  {
+   "id": 29,
+   "nombre": "SENCILLA",
+   "precio": 1030,
+   "familia_id": 12,
+   "imagen": "Carta/hamburguesa.svg"
+  },
+  {
+   "id": 30,
+   "nombre": "COMPLETA",
+   "precio": 1290,
+   "familia_id": 12,
+   "imagen": "Carta/hamburguesa.svg"
+  },
+  {
+   "id": 31,
+   "nombre": "QUESO DE CABRA",
+   "precio": 1330,
+   "familia_id": 12,
+   "imagen": "Carta/hamburguesa.svg"
+  },
+  {
+   "id": 32,
+   "nombre": "HORBEL",
+   "precio": 1350,
+   "familia_id": 12,
+   "imagen": "Carta/hamburguesa.svg"
+  },
+  {
+   "id": 33,
+   "nombre": "JAMON Y QUESO",
+   "precio": 800,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 34,
+   "nombre": "JAMON, QUESO, TOMATE, PIMIENTO VERDE",
+   "precio": 870,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 35,
+   "nombre": "LOMO, ALI-OLI, QUESO, BACON, PIMIENTO ROJO",
+   "precio": 870,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 36,
+   "nombre": "VEGETAL POLLO",
+   "precio": 870,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 37,
+   "nombre": "VEGETAL ATUN",
+   "precio": 870,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 38,
+   "nombre": "HORBEL",
+   "precio": 900,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 39,
+   "nombre": "BACON, QUESO, PIMIENTO VERDE",
+   "precio": 850,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 40,
+   "nombre": "TORTILLA PATATA",
+   "precio": 800,
+   "familia_id": 11,
+   "imagen": "Carta/bocadillo.svg"
+  },
+  {
+   "id": 41,
+   "nombre": "1. PECHUGA POLLO, ENSALADA, PATATA Y HUEVO",
+   "precio": 1290,
+   "familia_id": 13,
+   "imagen": "Carta/plato-combinado.svg"
+  },
+  {
+   "id": 42,
+   "nombre": "2. LOMO, ENSALADA, PATATA, HUEVO FRITO",
+   "precio": 1290,
+   "familia_id": 13,
+   "imagen": "Carta/plato-combinado.svg"
+  },
+  {
+   "id": 43,
+   "nombre": "3. FILETE, ENSALADA, PATATA, HUEVO FRITO",
+   "precio": 1290,
+   "familia_id": 13,
+   "imagen": "Carta/plato-combinado.svg"
+  },
+  {
+   "id": 44,
+   "nombre": "4. BACON, ENSALADA, PATATA, HUEVO FRITO",
+   "precio": 1290,
+   "familia_id": 13,
+   "imagen": "Carta/plato-combinado.svg"
+  },
+  {
+   "id": 45,
+   "nombre": "BACALAO A LA PIPERRADA CON PATATA PANADERA",
+   "precio": 1750,
+   "familia_id": 14,
+   "imagen": "Carta/bacalao.svg"
+  },
+  {
+   "id": 46,
+   "nombre": "CHIPIRONES PLANCHA",
+   "precio": 1730,
+   "familia_id": 14,
+   "imagen": "Carta/chipirones.svg"
+  },
+  {
+   "id": 47,
+   "nombre": "ENTRECOT",
+   "precio": 1700,
+   "familia_id": 15,
+   "imagen": "Carta/carne.svg"
+  },
+  {
+   "id": 48,
+   "nombre": "COSTILLA TERNERA",
+   "precio": 1500,
+   "familia_id": 15,
+   "imagen": "Carta/carne.svg"
+  },
+  {
+   "id": 49,
+   "nombre": "SECRETO IBERICO",
+   "precio": 1600,
+   "familia_id": 15,
+   "imagen": "Carta/secreto.svg"
+  },
+  {
+   "id": 50,
+   "nombre": "CHULETILLAS DE CORDERO",
+   "precio": 1790,
+   "familia_id": 15,
+   "imagen": "Carta/chuletillas.svg"
+  },
+  {
+   "id": 51,
+   "nombre": "CODILLO AL HORNO",
+   "precio": 1650,
+   "familia_id": 15,
+   "imagen": "Carta/codillo.svg"
+  },
+  {
+   "id": 52,
+   "nombre": "COULANT CHOCOLATE CON HELADO",
+   "precio": 600,
+   "familia_id": 16,
+   "imagen": "Carta/coulant.svg"
+  },
+  {
+   "id": 53,
+   "nombre": "TARTA DE QUESO CASERA",
+   "precio": 600,
+   "familia_id": 16,
+   "imagen": "Carta/tarta-queso.svg"
+  },
+  {
+   "id": 54,
+   "nombre": "YOGURTH NATURAL CON FRUTOS ROJOS",
+   "precio": 480,
+   "familia_id": 16,
+   "imagen": "Carta/yogur.svg"
+  },
+  {
+   "id": 55,
+   "nombre": "CUAJADA",
+   "precio": 480,
+   "familia_id": 16,
+   "imagen": "Carta/cuajada.svg"
+  },
+  {
+   "id": 56,
+   "nombre": "HELADOS VARIADOS",
+   "precio": 0,
+   "familia_id": 16,
+   "imagen": "Carta/helado.svg"
+  },
+  {
+   "id": 57,
+   "nombre": "SOLO / CORTADO",
+   "precio": 170,
+   "familia_id": 1,
+   "imagen": "Carta/cafe.svg"
+  },
+  {
+   "id": 58,
+   "nombre": "CON LECHE",
+   "precio": 180,
+   "familia_id": 1,
+   "imagen": "Carta/cafe-con-leche.svg"
+  },
+  {
+   "id": 59,
+   "nombre": "CON LECHE VASO",
+   "precio": 190,
+   "familia_id": 1,
+   "imagen": "Carta/cortado.svg"
+  },
+  {
+   "id": 60,
+   "nombre": "AMERICANO",
+   "precio": 180,
+   "familia_id": 1,
+   "imagen": "Carta/cafe.svg"
+  },
+  {
+   "id": 61,
+   "nombre": "INFUSIÓN / TÉ",
+   "precio": 180,
+   "familia_id": 1,
+   "imagen": "Carta/infusion.svg"
+  },
+  {
+   "id": 62,
+   "nombre": "COLACAO",
+   "precio": 220,
+   "familia_id": 1,
+   "imagen": "Carta/colacao.svg"
+  },
+  {
+   "id": 63,
+   "nombre": "SOLO DOBLE",
+   "precio": 200,
+   "familia_id": 1,
+   "imagen": "Carta/solo-doble.svg"
+  },
+  {
+   "id": 64,
+   "nombre": "VASO LECHE",
+   "precio": 100,
+   "familia_id": 1,
+   "imagen": "Carta/vaso-leche.svg"
+  },
+  {
+   "id": 65,
+   "nombre": "MÁS LICOR",
+   "precio": 80,
+   "familia_id": 1,
+   "imagen": "Carta/mas-licor.svg"
+  },
+  {
+   "id": 66,
+   "nombre": "ESCOCÉS / IRLANDÉS",
+   "precio": 620,
+   "familia_id": 1,
+   "imagen": "Carta/cafe-irlandes.svg"
+  },
+  {
+   "id": 67,
+   "nombre": "CAÑA",
+   "precio": 280,
+   "familia_id": 2,
+   "imagen": "Carta/cana.svg"
+  },
+  {
+   "id": 68,
+   "nombre": "ZURITO",
+   "precio": 180,
+   "familia_id": 2,
+   "imagen": "Carta/zurito.svg"
+  },
+  {
+   "id": 69,
+   "nombre": "CAÑA TOSTADA",
+   "precio": 290,
+   "familia_id": 2,
+   "imagen": "Carta/cana-tostada.svg"
+  },
+  {
+   "id": 70,
+   "nombre": "ZURITO TOSTADO",
+   "precio": 190,
+   "familia_id": 2,
+   "imagen": "Carta/zurito.svg"
+  },
+  {
+   "id": 71,
+   "nombre": "CAÑA LIMÓN",
+   "precio": 290,
+   "familia_id": 2,
+   "imagen": "Carta/cana-limon.svg"
+  },
+  {
+   "id": 72,
+   "nombre": "ZURITO LIMÓN",
+   "precio": 190,
+   "familia_id": 2,
+   "imagen": "Carta/zurito.svg"
+  },
+  {
+   "id": 73,
+   "nombre": "CERVEZA BOTELLÍN",
+   "precio": 300,
+   "familia_id": 2,
+   "imagen": "Carta/botellin.svg"
+  },
+  {
+   "id": 74,
+   "nombre": "COMBINADO RON",
+   "precio": 750,
+   "familia_id": 20,
+   "imagen": "Carta/ron-cola.svg"
+  },
+  {
+   "id": 75,
+   "nombre": "COMBINADO RON ESPECIAL",
+   "precio": 850,
+   "familia_id": 20,
+   "imagen": "Carta/ron-cola.svg"
+  },
+  {
+   "id": 76,
+   "nombre": "COPA RON",
+   "precio": 650,
+   "familia_id": 20,
+   "imagen": "Carta/copa-licor.svg"
+  },
+  {
+   "id": 77,
+   "nombre": "TXUPITO RON",
+   "precio": 350,
+   "familia_id": 20,
+   "imagen": "Carta/chupito.svg"
+  },
+  {
+   "id": 78,
+   "nombre": "COPA HAVANA 7",
+   "precio": 750,
+   "familia_id": 20,
+   "imagen": "Carta/copa-licor.svg"
+  },
+  {
+   "id": 79,
+   "nombre": "TXUPITO HAVANA 7",
+   "precio": 400,
+   "familia_id": 20,
+   "imagen": "Carta/chupito.svg"
+  },
+  {
+   "id": 80,
+   "nombre": "COPA RON PAMPERO",
+   "precio": 750,
+   "familia_id": 20,
+   "imagen": "Carta/copa-licor.svg"
+  },
+  {
+   "id": 81,
+   "nombre": "TXUPITO RON PAMPERO",
+   "precio": 400,
+   "familia_id": 20,
+   "imagen": "Carta/chupito.svg"
+  },
+  {
+   "id": 82,
+   "nombre": "COMBINADO WHISKY",
+   "precio": 750,
+   "familia_id": 21,
+   "imagen": "Carta/combinado.svg"
+  },
+  {
+   "id": 83,
+   "nombre": "COMBINADO WHISKY ESPECIAL",
+   "precio": 850,
+   "familia_id": 21,
+   "imagen": "Carta/combinado.svg"
+  },
+  {
+   "id": 84,
+   "nombre": "COPA WHISKY",
+   "precio": 550,
+   "familia_id": 21,
+   "imagen": "Carta/whisky.svg"
+  },
+  {
+   "id": 85,
+   "nombre": "TXUPITO WHISKY",
+   "precio": 300,
+   "familia_id": 21,
+   "imagen": "Carta/chupito.svg"
+  },
+  {
+   "id": 86,
+   "nombre": "COPA JACK DANIEL'S",
+   "precio": 600,
+   "familia_id": 21,
+   "imagen": "Carta/whisky.svg"
+  },
+  {
+   "id": 87,
+   "nombre": "TXUPITO JACK DANIEL'S",
+   "precio": 350,
+   "familia_id": 21,
+   "imagen": "Carta/chupito.svg"
+  },
+  {
+   "id": 88,
+   "nombre": "COCACOLA",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/cola.svg"
+  },
+  {
+   "id": 89,
+   "nombre": "KAS LIMÓN / NARANJA",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/naranja.svg"
+  },
+  {
+   "id": 90,
+   "nombre": "AGUA TXIKI PLÁSTICO",
+   "precio": 150,
+   "familia_id": 3,
+   "imagen": "Carta/agua.svg"
+  },
+  {
+   "id": 91,
+   "nombre": "AGUA GRANDE",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/agua.svg"
+  },
+  {
+   "id": 92,
+   "nombre": "ZUMO",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/zumo.svg"
+  },
+  {
+   "id": 93,
+   "nombre": "AQUARIUS LIMÓN / NARANJA",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/limon.svg"
+  },
+  {
+   "id": 94,
+   "nombre": "NESTEA",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/te-frio.svg"
+  },
+  {
+   "id": 95,
+   "nombre": "MOSTO PEQUEÑO",
+   "precio": 160,
+   "familia_id": 3,
+   "imagen": "Carta/mosto.svg"
+  },
+  {
+   "id": 96,
+   "nombre": "MOSTO GRANDE",
+   "precio": 230,
+   "familia_id": 3,
+   "imagen": "Carta/mosto.svg"
+  },
+  {
+   "id": 97,
+   "nombre": "AGUA CON GAS",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/agua-gas.svg"
+  },
+  {
+   "id": 98,
+   "nombre": "TÓNICA",
+   "precio": 270,
+   "familia_id": 3,
+   "imagen": "Carta/tonica.svg"
+  },
+  {
+   "id": 99,
+   "nombre": "CASERA",
+   "precio": 0,
+   "familia_id": 3,
+   "imagen": "Carta/limon.svg"
+  },
+  {
+   "id": 100,
+   "nombre": "COPA RUEDA",
+   "precio": 170,
+   "familia_id": 4,
+   "imagen": "Carta/copa-blanco.svg"
+  },
+  {
+   "id": 101,
+   "nombre": "COPA VERDEJO",
+   "precio": 250,
+   "familia_id": 4,
+   "imagen": "Carta/copa-blanco.svg"
+  },
+  {
+   "id": 102,
+   "nombre": "COPA CHARDONAY ENATE",
+   "precio": 280,
+   "familia_id": 4,
+   "imagen": "Carta/copa-blanco.svg"
+  },
+  {
+   "id": 103,
+   "nombre": "COPA MOSCATO",
+   "precio": 270,
+   "familia_id": 4,
+   "imagen": "Carta/copa-moscato.svg"
+  },
+  {
+   "id": 104,
+   "nombre": "COPA CLARETE / ROSADO",
+   "precio": 170,
+   "familia_id": 4,
+   "imagen": "Carta/copa-rosado.svg"
+  },
+  {
+   "id": 105,
+   "nombre": "COPA CRESTA ROSA",
+   "precio": 250,
+   "familia_id": 4,
+   "imagen": "Carta/copa-rosado.svg"
+  },
+  {
+   "id": 106,
+   "nombre": "GIN TONIC",
+   "precio": 750,
+   "familia_id": 22,
+   "imagen": "Carta/gin-tonic.svg"
+  },
+  {
+   "id": 107,
+   "nombre": "GIN TONIC ESPECIAL",
+   "precio": 900,
+   "familia_id": 22,
+   "imagen": "Carta/gin-tonic.svg"
+  },
+  {
+   "id": 108,
+   "nombre": "TXUPITO GINEBRA",
+   "precio": 300,
+   "familia_id": 22,
+   "imagen": "Carta/chupito.svg"
+  },
+  {
+   "id": 109,
+   "nombre": "TORTILLA PATATA",
+   "precio": 280,
+   "familia_id": 17,
+   "imagen": "Carta/tortilla.svg"
+  },
+  {
+   "id": 110,
+   "nombre": "TORTILLA RELLENA",
+   "precio": 300,
+   "familia_id": 17,
+   "imagen": "Carta/tortilla.svg"
+  },
+  {
+   "id": 111,
+   "nombre": "MONTADITO FIN DE SEMANA",
+   "precio": 280,
+   "familia_id": 17,
+   "imagen": "Carta/montadito.svg"
+  },
+  {
+   "id": 112,
+   "nombre": "PINTXO DIARIO",
+   "precio": 270,
+   "familia_id": 17,
+   "imagen": "Carta/pintxo.svg"
+  },
+  {
+   "id": 113,
+   "nombre": "BOTELLA TINTO AÑO",
+   "precio": 1050,
+   "familia_id": 5,
+   "imagen": "Carta/botella-tinto.svg"
+  },
+  {
+   "id": 114,
+   "nombre": "BOTELLA CRIANZA",
+   "precio": 1850,
+   "familia_id": 5,
+   "imagen": "Carta/botella-tinto.svg"
+  },
+  {
+   "id": 115,
+   "nombre": "BOTELLA CRIANZA AZPILICUETA",
+   "precio": 2250,
+   "familia_id": 5,
+   "imagen": "Carta/botella-tinto.svg"
+  },
+  {
+   "id": 116,
+   "nombre": "MARIANITO MARTINI",
+   "precio": 270,
+   "familia_id": 6,
+   "imagen": "Carta/vermut.svg"
+  },
+  {
+   "id": 117,
+   "nombre": "VERMUT MARTINI",
+   "precio": 320,
+   "familia_id": 6,
+   "imagen": "Carta/vermut.svg"
+  },
+  {
+   "id": 118,
+   "nombre": "KALIMOTXO",
+   "precio": 420,
+   "familia_id": 6,
+   "imagen": "Carta/kalimotxo.svg"
+  },
+  {
+   "id": 119,
+   "nombre": "TINTO DE VERANO",
+   "precio": 420,
+   "familia_id": 6,
+   "imagen": "Carta/tinto-verano.svg"
+  },
+  {
+   "id": 120,
+   "nombre": "BITTER KAS",
+   "precio": 300,
+   "familia_id": 6,
+   "imagen": "Carta/bitter.svg"
+  },
+  {
+   "id": 121,
+   "nombre": "BITTER CINZANO",
+   "precio": 300,
+   "familia_id": 6,
+   "imagen": "Carta/bitter.svg"
+  },
+  {
+   "id": 122,
+   "nombre": "COPA BAILEYS",
+   "precio": 430,
+   "familia_id": 23,
+   "imagen": "Carta/copa-crema.svg"
+  },
+  {
+   "id": 123,
+   "nombre": "TXUPITO BAILEYS",
+   "precio": 290,
+   "familia_id": 23,
+   "imagen": "Carta/chupito-crema.svg"
+  },
+  {
+   "id": 124,
+   "nombre": "COPA LICOR",
+   "precio": 410,
+   "familia_id": 23,
+   "imagen": "Carta/copa-licor.svg"
+  },
+  {
+   "id": 125,
+   "nombre": "TXUPITO LICOR",
+   "precio": 270,
+   "familia_id": 23,
+   "imagen": "Carta/chupito.svg"
+  },
+  {
+   "id": 126,
+   "nombre": "COPA ANÍS",
+   "precio": 410,
+   "familia_id": 23,
+   "imagen": "Carta/copa-anis.svg"
+  },
+  {
+   "id": 127,
+   "nombre": "TXUPITO ANÍS",
+   "precio": 270,
+   "familia_id": 23,
+   "imagen": "Carta/chupito-anis.svg"
+  },
+  {
+   "id": 128,
+   "nombre": "COPA TINTO AÑO",
+   "precio": 170,
+   "familia_id": 4,
+   "imagen": "Carta/copa-tinto.svg"
+  },
+  {
+   "id": 129,
+   "nombre": "COPA CRIANZA",
+   "precio": 250,
+   "familia_id": 4,
+   "imagen": "Carta/copa-tinto.svg"
+  },
+  {
+   "id": 130,
+   "nombre": "COPA CRIANZA AZPILICUETA",
+   "precio": 290,
+   "familia_id": 4,
+   "imagen": "Carta/copa-tinto.svg"
+  },
+  {
+   "id": 131,
+   "nombre": "COPA TXAKOLI",
+   "precio": 240,
+   "familia_id": 18,
+   "imagen": "Carta/vaso-txakoli.svg"
+  },
+  {
+   "id": 132,
+   "nombre": "VASO SIDRA",
+   "precio": 110,
+   "familia_id": 18,
+   "imagen": "Carta/vaso-sidra.svg"
+  },
+  {
+   "id": 133,
+   "nombre": "BOTELLA TXAKOLI",
+   "precio": 1650,
+   "familia_id": 18,
+   "imagen": "Carta/txakoli.svg"
+  },
+  {
+   "id": 134,
+   "nombre": "BOTELLA SIDRA",
+   "precio": 600,
+   "familia_id": 18,
+   "imagen": "Carta/sidra.svg"
+  },
+  {
+   "id": 135,
+   "nombre": "BOTELLA ROSADO",
+   "precio": 1150,
+   "familia_id": 5,
+   "imagen": "Carta/botella-rosado.svg"
+  },
+  {
+   "id": 136,
+   "nombre": "BOTELLA RUEDA",
+   "precio": 1050,
+   "familia_id": 5,
+   "imagen": "Carta/botella-blanco.svg"
+  },
+  {
+   "id": 137,
+   "nombre": "BOTELLA VERDEJO",
+   "precio": 1500,
+   "familia_id": 5,
+   "imagen": "Carta/botella-blanco.svg"
+  },
+  {
+   "id": 138,
+   "nombre": "BOTELLA ENATE",
+   "precio": 1850,
+   "familia_id": 5,
+   "imagen": "Carta/botella-blanco.svg"
+  },
+  {
+   "id": 139,
+   "nombre": "BOTELLA CRESTA ROSA",
+   "precio": 1500,
+   "familia_id": 5,
+   "imagen": "Carta/botella-rosado.svg"
+  },
+  {
+   "id": 140,
+   "nombre": "BOTELLA MOSCATO",
+   "precio": 1500,
+   "familia_id": 5,
+   "imagen": "Carta/botella-blanco.svg"
+  }
+ ]
+}

@@ -1,0 +1,254 @@
+// Servidor HTTP del TPV: API JSON, avisos en tiempo real (SSE) y la aplicación web.
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { type DB, ACCIONES } from './db.ts';
+import * as v from './ventas.ts';
+import * as g from './gestion.ts';
+import { registrar, describir, leerRegistro } from './registro.ts';
+import { listarImagenes, subirImagen, leerImagen, listaAlergenos } from './imagenes.ts';
+import * as o from './operarios.ts';
+import { PERMISOS } from './db.ts';
+import * as cl from './clientes.ts';
+import * as st from './stocks.ts';
+import * as correo from './correo.ts';
+import * as salas from './salas.ts';
+import * as comandas from './comandas.ts';
+import { estadoLicencia, activarLicencia, comprobarModulo } from './licencia.ts';
+
+const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
+const TIPOS: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png',
+};
+
+type Handler = (p: { db: DB; params: string[]; body: any; url: URL }) => unknown;
+type Ruta = { metodo: string; patron: RegExp; handler: Handler; cambia: boolean };
+
+const rutas: Ruta[] = [];
+function ruta(metodo: string, patron: string, handler: Handler) {
+  const re = new RegExp('^' + patron.replace(/:(\w+)/g, '([^/]+)') + '$');
+  rutas.push({ metodo, patron: re, handler, cambia: metodo !== 'GET' });
+}
+const num = (s: string) => {
+  const n = Number(s);
+  if (!Number.isInteger(n)) throw new v.ErrorTPV('Identificador no válido');
+  return n;
+};
+
+// Datos para pintar el TPV de una vez.
+ruta('GET', '/api/inicio', async ({ db }) => ({
+  alergenos: await listaAlergenos(),
+  empresa: g.getEmpresa(db),
+  departamentos: g.listar(db, 'departamentos'),
+  familias: g.listar(db, 'familias'),
+  articulos: g.listar(db, 'articulos'),
+  zonas: g.listar(db, 'zonas'),
+  mesas: g.listar(db, 'mesas'),
+  zona_objetos: db.prepare('SELECT * FROM zona_objetos ORDER BY id').all(),
+  formas_cobro: g.listar(db, 'formas_cobro'),
+  botones: g.listar(db, 'botones'),
+  impresoras: g.listar(db, 'impresoras'),
+  comentarios: g.listar(db, 'comentarios'),
+  ordenes_plato: g.listar(db, 'ordenes_plato'),
+  operarios: o.operariosPublicos(db),
+  puestos: g.listar(db, 'puestos'),
+  permisos: PERMISOS,
+  secciones_cierre: v.SECCIONES_CIERRE,
+  aspecto: g.getAspecto(db),
+  aspecto_campos: g.ASPECTO,
+  acciones: ACCIONES,
+  licencia: estadoLicencia(db),
+}));
+
+// Módulos con licencia.
+ruta('GET', '/api/licencia', ({ db }) => estadoLicencia(db));
+ruta('POST', '/api/licencia', ({ db, body }) => activarLicencia(db, body?.codigo));
+
+// Clientes y facturas completas.
+ruta('GET', '/api/clientes', ({ db, url }) => cl.buscarClientes(db, url.searchParams.get('q')));
+ruta('GET', '/api/clientes/:id/ficha', ({ db, params, url }) => cl.fichaCliente(db, num(params[0]), url.searchParams.get('desde'), url.searchParams.get('hasta')));
+ruta('POST', '/api/clientes/:id/factura', ({ db, params, body }) => cl.crearFactura(db, num(params[0]), body));
+ruta('GET', '/api/facturas/:id', ({ db, params }) => cl.getFactura(db, num(params[0])));
+ruta('POST', '/api/facturas/:id/email', ({ db, params, body }) => correo.enviarDocumento(db, cl.getFactura(db, num(params[0])), 'Factura', body?.para));
+
+// Stocks.
+ruta('GET', '/api/stocks', ({ db, url }) => st.existencias(db, url.searchParams.get('solo') === '1'));
+ruta('GET', '/api/stocks/articulo/:id', ({ db, params }) => st.movimientos(db, num(params[0])));
+ruta('POST', '/api/stocks/ajuste', ({ db, body }) => st.ajustarStock(db, body));
+ruta('GET', '/api/stocks/albaranes', ({ db }) => st.listarAlbaranes(db));
+ruta('GET', '/api/stocks/albaranes/:id', ({ db, params }) => st.getAlbaran(db, num(params[0])));
+ruta('POST', '/api/stocks/albaranes', ({ db, body }) => st.crearAlbaran(db, body));
+
+// Correo.
+ruta('POST', '/api/tickets/:id/email', ({ db, params, body }) => correo.enviarDocumento(db, v.getTicket(db, num(params[0])), 'Factura simplificada', body?.para));
+ruta('POST', '/api/correo/prueba', ({ db, body }) => correo.enviarPrueba(db, body?.para));
+
+ruta('GET', '/api/cuentas', ({ db }) => v.cuentasAbiertas(db));
+ruta('POST', '/api/cuentas', ({ db, body }) => v.abrirCuenta(db, body));
+ruta('GET', '/api/cuentas/:id', ({ db, params }) => v.getCuenta(db, num(params[0])));
+ruta('PATCH', '/api/cuentas/:id', ({ db, params, body }) => v.actualizarCuenta(db, num(params[0]), body));
+ruta('DELETE', '/api/cuentas/:id/lineas', ({ db, params }) => v.borrarTodasLineas(db, num(params[0])));
+ruta('POST', '/api/cuentas/:id/lineas', ({ db, params, body }) => v.anadirLinea(db, num(params[0]), body));
+ruta('POST', '/api/cuentas/:id/orden_plato', ({ db, params, body }) => v.asignarOrdenPlato(db, num(params[0]), body));
+ruta('GET', '/api/cuentas/:id/comanda', ({ db, params }) => v.comandaCuenta(db, num(params[0])));
+ruta('POST', '/api/cuentas/:id/marchar', async ({ db, params, body }) => {
+  const r: any = v.marchar(db, num(params[0]), body);
+  r.impresoras = await comandas.imprimirMarcha(db, num(params[0]), Number(body?.orden_plato_id), r.texto);
+  return r;
+});
+ruta('POST', '/api/cajon', ({ db }) => comandas.abrirCajon(db));
+ruta('GET', '/api/cuentas/:id/comanda/pendiente', ({ db, params }) => comandas.pendienteComanda(db, num(params[0])));
+ruta('POST', '/api/cuentas/:id/comanda/enviar', ({ db, params, body }) => comandas.enviarComanda(db, num(params[0]), body?.modo));
+ruta('GET', '/api/cocina/marchas', ({ db }) => db.prepare('SELECT * FROM marchas ORDER BY id DESC LIMIT 50').all());
+ruta('POST', '/api/operarios/entrar', ({ db, body }) => o.entrar(db, body));
+ruta('GET', '/api/informes/empleados', ({ db, url }) => o.informeEmpleados(db, url.searchParams.get('desde'), url.searchParams.get('hasta'), url.searchParams.get('operario')));
+ruta('POST', '/api/cuentas/:id/cobrar', ({ db, params, body }) => v.cobrarCuenta(db, num(params[0]), body));
+ruta('GET', '/api/zonas/:id/plano', ({ db, params }) => salas.getPlano(db, num(params[0])));
+ruta('PUT', '/api/zonas/:id/plano', ({ db, params, body }) => salas.guardarPlano(db, num(params[0]), body));
+ruta('POST', '/api/cuentas/:id/traspasar', ({ db, params, body }) => v.traspasar(db, num(params[0]), body));
+ruta('POST', '/api/lineas/:id/invitar', ({ db, params, body }) => v.invitar(db, num(params[0]), body));
+ruta('PATCH', '/api/lineas/:id', ({ db, params, body }) => v.modificarLinea(db, num(params[0]), body));
+ruta('DELETE', '/api/lineas/:id', ({ db, params }) => v.borrarLinea(db, num(params[0])));
+
+ruta('GET', '/api/tickets', ({ db, url }) => v.listarTickets(db, url.searchParams.get('todos') !== '1'));
+ruta('GET', '/api/tickets/:id', ({ db, params }) => v.getTicket(db, num(params[0])));
+ruta('POST', '/api/tickets/:id/anular', ({ db, params }) => v.anularTicket(db, num(params[0])));
+
+ruta('GET', '/api/caja', ({ db }) => v.resumenCaja(db));
+ruta('POST', '/api/caja/cierre', async ({ db, body }) => {
+  const c: any = v.cerrarCaja(db, body);
+  // El resumen por correo no puede impedir el cierre: si falla, queda en el registro.
+  try { c.correo = await correo.enviarCierre(db, c.id); } catch (e: any) {
+    c.correo_error = e.message;
+    registrar(db, { nivel: 'aviso', accion: `No se pudo enviar el cierre por correo: ${e.message}`, origen: 'servidor' });
+  }
+  return c;
+});
+ruta('GET', '/api/informes/cierres', ({ db }) => v.listarCierres(db));
+ruta('GET', '/api/informes/cierres/:id', ({ db, params }) => v.verCierre(db, num(params[0])));
+
+ruta('GET', '/api/informes/borrados', ({ db, url }) => v.informeBorrados(db, url.searchParams.get('desde'), url.searchParams.get('hasta')));
+ruta('GET', '/api/registro', ({ db, url }) => leerRegistro(db, url.searchParams.get('fecha'), url.searchParams.get('q'), url.searchParams.get('nivel')));
+
+ruta('GET', '/api/imagenes', () => listarImagenes());
+ruta('POST', '/api/imagenes', ({ body }) => subirImagen(body));
+ruta('POST', '/api/carta-demo', ({ db }) => g.cargarCartaDemo(db));
+ruta('POST', '/api/imagenes/asignar', ({ db, body }) => g.imagenesAutomaticas(db, body));
+ruta('GET', '/api/aspecto', ({ db }) => g.getAspecto(db));
+ruta('PUT', '/api/aspecto', ({ db, body }) => g.setAspecto(db, body));
+ruta('GET', '/api/empresa', ({ db }) => g.getEmpresa(db));
+ruta('PUT', '/api/empresa', ({ db, body }) => g.setEmpresa(db, body));
+ruta('GET', '/api/gestion/:tabla', ({ db, params }) => g.listar(db, params[0]));
+ruta('POST', '/api/gestion/:tabla', ({ db, params, body }) => g.crear(db, params[0], body));
+ruta('PUT', '/api/gestion/:tabla/:id', ({ db, params, body }) => g.actualizar(db, params[0], num(params[1]), body));
+ruta('POST', '/api/gestion/:tabla/ordenar', ({ db, params, body }) => g.ordenar(db, params[0], body));
+ruta('DELETE', '/api/gestion/:tabla/:id', ({ db, params }) => g.borrar(db, params[0], num(params[1])));
+
+// Avisos a todos los puestos conectados (TPV, PDA, KDS) cuando algo cambia.
+const oyentes = new Set<ServerResponse>();
+function avisar(tipo: string) {
+  for (const r of oyentes) r.write(`data: ${JSON.stringify({ tipo, en: Date.now() })}\n\n`);
+}
+
+async function leerCuerpo(req: IncomingMessage) {
+  const trozos: Buffer[] = [];
+  let tam = 0;
+  for await (const t of req) {
+    tam += t.length;
+    if (tam > 8_000_000) throw new v.ErrorTPV('Petición demasiado grande', 413);
+    trozos.push(t);
+  }
+  if (!trozos.length) return {};
+  try {
+    return JSON.parse(Buffer.concat(trozos).toString('utf8'));
+  } catch {
+    throw new v.ErrorTPV('JSON no válido');
+  }
+}
+
+function json(res: ServerResponse, status: number, data: unknown) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(data));
+}
+
+async function estatico(res: ServerResponse, pathname: string) {
+  const rel = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const ruta = normalize(join(PUBLIC, rel));
+  if (!ruta.startsWith(PUBLIC)) return json(res, 403, { error: 'Prohibido' });
+  try {
+    const datos = await readFile(ruta);
+    // no-cache: el navegador comprueba siempre si hay una versión nueva tras actualizar el TPV.
+    res.writeHead(200, { 'content-type': TIPOS[extname(ruta)] ?? 'application/octet-stream', 'cache-control': 'no-cache' });
+    res.end(datos);
+  } catch {
+    json(res, 404, { error: 'No encontrado' });
+  }
+}
+
+export function crearServidor(db: DB) {
+  return createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const origen = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+    let body: any = {};
+    // Operario en uso y puesto, que manda cada pantalla en las cabeceras.
+    const idCab = (n: string) => { const x = Number(req.headers[n]); return Number.isInteger(x) && x > 0 ? x : null; };
+    const opId = idCab('x-operario');
+    const operario = opId ? o.operarioPorId(db, opId) : null;
+    const quien = operario ? { id: operario.id, nombre: operario.nombre } : null;
+    try {
+      if (url.pathname === '/api/eventos') {
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+        res.write(': conectado\n\n');
+        oyentes.add(res);
+        req.on('close', () => oyentes.delete(res));
+        return;
+      }
+      if (url.pathname.startsWith('/imagenes/') && req.method === 'GET') {
+        let rel = '';
+        try { rel = decodeURIComponent(url.pathname.slice('/imagenes/'.length)); } catch {}
+        const img = await leerImagen(rel);
+        if (!img) return json(res, 404, { error: 'Imagen no encontrada' });
+        res.writeHead(200, { 'content-type': img.tipo, 'cache-control': 'max-age=86400' });
+        return res.end(img.datos);
+      }
+      if (url.pathname.startsWith('/api/')) {
+        for (const r of rutas) {
+          if (r.metodo !== req.method) continue;
+          const m = r.patron.exec(url.pathname);
+          if (!m) continue;
+          body = r.metodo === 'GET' ? {} : await leerCuerpo(req);
+          o.comprobarPermiso(db, idCab('x-puesto'), operario, r.metodo, url.pathname);
+          comprobarModulo(db, r.metodo, url.pathname, body);
+          v.contexto.operario = quien;
+          v.contexto.permisos = operario?.permisos ?? [];
+          v.contexto.puesto = idCab('x-puesto');
+          const data: any = await r.handler({ db, params: m.slice(1).map(decodeURIComponent), body, url });
+          json(res, 200, data);
+          if (r.cambia) {
+            const deQuien = url.pathname === '/api/operarios/entrar' ? { id: data.id, nombre: data.nombre } : quien;
+            registrar(db, { operario: deQuien, accion: describir(r.metodo, url.pathname), metodo: r.metodo, ruta: url.pathname, estado: 200, origen, datos: body });
+            avisar(url.pathname.split('/')[2]);
+          }
+          return;
+        }
+        return json(res, 404, { error: 'Ruta no encontrada' });
+      }
+      if (req.method !== 'GET') return json(res, 405, { error: 'Método no permitido' });
+      await estatico(res, url.pathname);
+    } catch (e: any) {
+      const status = e instanceof v.ErrorTPV ? e.status : 500;
+      if (status === 500) console.error(e);
+      if (url.pathname.startsWith('/api/')) {
+        const metodo = req.method ?? '';
+        registrar(db, {
+          operario: quien,
+          nivel: status >= 500 ? 'error' : 'aviso', accion: `${describir(metodo, url.pathname)}: ${status === 500 ? String(e?.message ?? e) : e.message}`,
+          metodo, ruta: url.pathname, estado: status, origen, datos: body,
+        });
+      }
+      json(res, status, { error: status === 500 ? 'Error interno del servidor' : e.message });
+    }
+  });
+}
