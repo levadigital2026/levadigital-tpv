@@ -457,6 +457,10 @@ function migrar(db: DB) {
   anadirColumna(db, 'mesas', 'ancho', 'REAL NOT NULL DEFAULT 110');
   anadirColumna(db, 'mesas', 'alto', 'REAL NOT NULL DEFAULT 110');
   anadirColumna(db, 'mesas', 'activa', 'INTEGER NOT NULL DEFAULT 1');
+  anadirColumna(db, 'mesas', 'color_fondo', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'mesas', 'color_texto', "TEXT NOT NULL DEFAULT ''");
+  anadirColumna(db, 'mesas', 'letra', 'INTEGER NOT NULL DEFAULT 100');
+  anadirColumna(db, 'zona_objetos', 'color', "TEXT NOT NULL DEFAULT ''");
   const unaVez = (nombre: string, fn: () => void) => {
     if (db.prepare('SELECT 1 FROM migraciones WHERE nombre = ?').get(nombre)) return;
     fn();

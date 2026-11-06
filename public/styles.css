@@ -528,14 +528,14 @@ b.invitacion { color: #2a9d8f; font-size: 13px; text-transform: uppercase; lette
 .obj-texto { position: absolute; inset: 0; display: grid; place-items: center; color: #f3e6d8; font-weight: 700; font-size: max(10px, 1.4cqw); letter-spacing: 2px; }
 .mesa-plano { padding: 0; border: 0; background: none; border-radius: 0; }
 .mesa-plano .s { fill: #c5ccd5; }
-.mesa-plano .t { fill: #ffffff; stroke: #8794a3; stroke-width: 2; }
+.mesa-plano .t { fill: var(--mf, #ffffff); stroke: #8794a3; stroke-width: 2; }
 .mesa-plano.ocupada .t { fill: var(--ocupada); stroke: var(--ocupada-borde); stroke-width: 3; }
 .mesa-plano.ocupada .s { fill: #f0b48a; }
 .mesa-plano.apagada { opacity: .35; }
 .mesa-txt { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; pointer-events: none; }
-.mesa-txt b { font-size: max(12px, 1.7cqw); }
-.mesa-txt small { font-size: max(10px, 1.2cqw); color: var(--suave); font-weight: 600; }
-.mesa-plano.ocupada .mesa-txt small { color: #9a4a17; }
+.mesa-txt b { font-size: calc(max(12px, 1.7cqw) * var(--fl, 1)); }
+.mesa-txt small { font-size: calc(max(10px, 1.2cqw) * var(--fl, 1)); font-weight: 700; opacity: .85; }
+.mesa-plano.ocupada .mesa-txt { color: #7a3510 !important; }
 
 /* Diseño de salas */
 .diseno { height: 100%; display: flex; flex-direction: column; padding: 10px 14px; gap: 8px; }
@@ -549,7 +549,7 @@ b.invitacion { color: #2a9d8f; font-size: 13px; text-transform: uppercase; lette
 .diseno-panel label { display: grid; gap: 3px; font-size: 13px; color: var(--suave); }
 .diseno-panel > button { padding: 10px; font-weight: 600; }
 .muestras { display: flex; flex-wrap: wrap; gap: 6px; }
-.muestras button, .otro-color { width: 30px; height: 30px; padding: 0; border: 1px solid var(--borde); border-radius: 50%; }
+.muestras button, .otro-color { width: 28px; height: 28px; padding: 0; border: 1px solid var(--borde); border-radius: 50%; }
 .muestras button.activa { outline: 3px solid var(--marca); outline-offset: 1px; }
 .otro-color { overflow: hidden; display: block; background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red); cursor: pointer; }
 .otro-color input { opacity: 0; width: 100%; height: 100%; cursor: pointer; }

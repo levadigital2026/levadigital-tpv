@@ -837,25 +837,30 @@ function svgMesa(m) {
   const mesa = m.forma === 'redonda'
     ? `<ellipse class="t" cx="${w / 2}" cy="${h / 2}" rx="${w / 2 - i}" ry="${h / 2 - i}"/>`
     : `<rect class="t" x="${i}" y="${i}" width="${w - 2 * i}" height="${h - 2 * i}" rx="8"/>`;
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${sillas}${mesa}</svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" ${m.color_fondo ? `style="--mf:${m.color_fondo}"` : ''}>${sillas}${mesa}</svg>`;
 }
 const OBJETOS_SALA = {
   separador: { nombre: 'Separador', w: 220, h: 14 }, planta: { nombre: 'Planta', w: 50, h: 50 }, barra: { nombre: 'Barra', w: 300, h: 60 },
   columna: { nombre: 'Columna', w: 40, h: 40 }, puerta: { nombre: 'Puerta', w: 70, h: 70 }, sofa: { nombre: 'Sofá', w: 160, h: 56 },
 };
+// Color por defecto de cada objeto (se puede cambiar en el diseñador). Los brillos son capas blancas encima.
+const COLOR_OBJETO = { separador: '#8a6f55', planta: '#4f8a3c', barra: '#6f4e37', columna: '#9aa3ad', puerta: '#0064fc', sofa: '#7a5c8f' };
 function svgObjeto(o) {
-  const w = o.ancho, h = o.alto;
+  const w = o.ancho, h = o.alto, c = o.color || COLOR_OBJETO[o.tipo];
+  const brillo = a => `rgba(255,255,255,${a})`;
   switch (o.tipo) {
-    case 'planta': return `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="#4f8a3c"/>${[0, 72, 144, 216, 288].map(a => `<ellipse cx="50" cy="26" rx="13" ry="24" fill="#6fb04f" transform="rotate(${a} 50 50)"/>`).join('')}<circle cx="50" cy="50" r="10" fill="#3d6e2e"/></svg>`;
-    case 'separador': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="${Math.min(w, h) / 2}" fill="#8a6f55"/>${Array.from({ length: Math.floor(Math.max(w, h) / 30) }, (_, k) => w >= h ? `<circle cx="${15 + k * 30}" cy="${h / 2}" r="${Math.min(h, 14) / 3}" fill="#6fb04f"/>` : `<circle cx="${w / 2}" cy="${15 + k * 30}" r="${Math.min(w, 14) / 3}" fill="#6fb04f"/>`).join('')}</svg>`;
-    case 'barra': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="10" fill="#6f4e37"/><rect x="5" y="5" width="${w - 10}" height="${h - 10}" rx="7" fill="#8b6447"/></svg><span class="obj-texto">BARRA</span>`;
-    case 'columna': return `<svg viewBox="0 0 40 40"><rect width="40" height="40" rx="4" fill="#9aa3ad"/><rect x="6" y="6" width="28" height="28" rx="3" fill="#b8c0c8"/></svg>`;
-    case 'puerta': return `<svg viewBox="0 0 70 70"><path d="M2 68 L2 2 A66 66 0 0 1 68 68 Z" fill="rgba(0,100,252,.08)" stroke="#0064fc" stroke-width="2" stroke-dasharray="4 3"/><rect x="0" y="0" width="5" height="70" fill="#0064fc"/></svg>`;
-    case 'sofa': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="14" fill="#7a5c8f"/><rect x="8" y="${h * 0.35}" width="${w - 16}" height="${h * 0.55}" rx="9" fill="#9b7bb0"/></svg>`;
+    case 'planta': return `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="${c}"/>${[0, 72, 144, 216, 288].map(a => `<ellipse cx="50" cy="26" rx="13" ry="24" fill="${brillo(.28)}" transform="rotate(${a} 50 50)"/>`).join('')}<circle cx="50" cy="50" r="10" fill="rgba(0,0,0,.18)"/></svg>`;
+    case 'separador': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="${Math.min(w, h) / 2}" fill="${c}"/></svg>`;
+    case 'barra': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="10" fill="${c}"/><rect x="5" y="5" width="${w - 10}" height="${h - 10}" rx="7" fill="${brillo(.14)}"/></svg><span class="obj-texto">BARRA</span>`;
+    case 'columna': return `<svg viewBox="0 0 40 40"><rect width="40" height="40" rx="4" fill="${c}"/><rect x="6" y="6" width="28" height="28" rx="3" fill="${brillo(.3)}"/></svg>`;
+    case 'puerta': return `<svg viewBox="0 0 70 70"><path d="M2 68 L2 2 A66 66 0 0 1 68 68 Z" fill="${c}" fill-opacity=".1" stroke="${c}" stroke-width="2" stroke-dasharray="4 3"/><rect x="0" y="0" width="5" height="70" fill="${c}"/></svg>`;
+    case 'sofa': return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect width="${w}" height="${h}" rx="14" fill="${c}"/><rect x="8" y="${h * 0.35}" width="${w - 16}" height="${h * 0.55}" rx="9" fill="${brillo(.22)}"/></svg>`;
   }
   return '';
 }
 const altoLienzo = (mesas, objetos) => Math.max(600, ...mesas.map(m => (m.py ?? 0) + m.alto + 30), ...objetos.map(o => o.py + o.alto + 30));
+// Nombre de la mesa con su color y tamaño de letra.
+const textoMesa = (m, extra = '') => `<span class="mesa-txt" style="--fl:${(m.letra || 100) / 100};${m.color_texto ? 'color:' + m.color_texto : ''}"><b>${esc(m.nombre)}</b>${extra ? `<small>${extra}</small>` : ''}</span>`;
 const caja = (x, H) => `left:${x.px / 10}%;top:${x.py / H * 100}%;width:${x.ancho / 10}%;height:${x.alto / H * 100}%`;
 // Mesas creadas desde la tabla (sin posición) se colocan solas en huecos.
 function colocar(mesas) {
@@ -868,7 +873,7 @@ function htmlPlano(zona, mesas, objetos, estadoMesa) {
   return `<div class="lienzo" style="aspect-ratio:1000/${H};background:${esc(zona.color_fondo || '#ffffff')}">
     ${objetos.map(o => `<div class="obj obj-${o.tipo}" style="${caja(o, H)}">${svgObjeto(o)}</div>`).join('')}
     ${mesas.map(m => { const st = estadoMesa(m); return `<button class="mesa-plano ${st.clase}" data-mesa="${m.id}" style="${caja(m, H)}">${svgMesa(m)}
-      <span class="mesa-txt"><b>${esc(m.nombre)}</b><small>${st.texto}</small></span></button>`; }).join('')}
+      ${textoMesa(m, st.texto)}</button>`; }).join('')}
   </div>`;
 }
 
@@ -884,7 +889,7 @@ async function pintarMesas() {
     const mesas = colocar(E.datos.mesas.filter(m => m.zona_id === zona.id).map(m => ({ ...m })));
     const objetos = (E.datos.zona_objetos ?? []).filter(o => o.zona_id === zona.id);
     cuerpo = `<div class="plano-sala">${htmlPlano(zona, mesas, objetos, m => { const a = abiertaDe(m);
-      return { clase: (a ? 'ocupada' : 'libre') + (traspaso && !a ? ' apagada' : ''), texto: a ? euros(a.total) + (a.comensales ? ` · ${a.comensales}p` : '') : 'Libre' }; })}</div>`;
+      return { clase: (a ? 'ocupada' : 'libre') + (traspaso && !a ? ' apagada' : ''), texto: a ? euros(a.total) : '' }; })}</div>`;
   } else {
     const cuentas = E.abiertas.filter(a => a.zona_id === zona?.id);
     cuerpo = `<div class="plano"><div class="lista-barra">
@@ -2634,6 +2639,12 @@ const PLANTILLAS_MESA = [
   ['Cuadrada 2', 'cuadrada', 2, 80, 80], ['Cuadrada 4', 'cuadrada', 4, 110, 110], ['Rectangular 6', 'rectangular', 6, 190, 105],
   ['Rectangular 8', 'rectangular', 8, 240, 110], ['Redonda 2', 'redonda', 2, 80, 80], ['Redonda 4', 'redonda', 4, 115, 115], ['Redonda 6', 'redonda', 6, 145, 145],
 ];
+const COLORES_MESA = ['#ffffff', '#f4f6f8', '#e3edff', '#e6efe3', '#f3ead8', '#d9c3a5', '#3c3c3b', '#0b1527'];
+const COLORES_LETRA = ['#3c3c3b', '#000000', '#ffffff', '#0064fc', '#0b1527', '#6f4e37', '#2e9d4f', '#c8443a'];
+const COLORES_OBJETO = ['#8a6f55', '#6f4e37', '#4f8a3c', '#2a9d8f', '#9aa3ad', '#3c3c3b', '#0064fc', '#7a5c8f', '#c8443a', '#e0b84a'];
+// Muestras de color del diseñador (data-c = campo del elemento elegido) y un selector libre.
+const muestrasSala = (campo, actual, lista) => `<div class="muestras">${lista.map(c => `<button data-c="${campo}" data-v="${c}" style="background:${c}" class="${actual.toLowerCase() === c ? 'activa' : ''}"></button>`).join('')}
+  <label class="otro-color" title="Otro color"><input type="color" data-c-libre="${campo}" value="${esc(actual)}"></label></div>`;
 const COLORES_SALA = ['#ffffff', '#f4f6f8', '#f3ead8', '#e8dcc8', '#e6efe3', '#e3edff', '#f6e3e1', '#d9dee5'];
 
 async function pintarDiseno() {
@@ -2666,7 +2677,7 @@ async function pintarDiseno() {
         <div class="diseno-lienzo">
           <div class="lienzo editable" id="lienzo" style="aspect-ratio:1000/${H};background:${esc(D.color)}">
             ${D.objetos.map((o, i) => `<div class="obj obj-${o.tipo} ${D.sel?.t === 'o' && D.sel.i === i ? 'sel' : ''}" data-el="o${i}" style="${caja(o, H)}">${svgObjeto(o)}${D.sel?.t === 'o' && D.sel.i === i ? '<i class="tirador" data-tirador="1"></i>' : ''}</div>`).join('')}
-            ${D.mesas.map((m, i) => `<div class="mesa-plano libre ${D.sel?.t === 'm' && D.sel.i === i ? 'sel' : ''}" data-el="m${i}" style="${caja(m, H)}">${svgMesa(m)}<span class="mesa-txt"><b>${esc(m.nombre)}</b><small>${m.plazas} p.</small></span>${D.sel?.t === 'm' && D.sel.i === i ? '<i class="tirador" data-tirador="1"></i>' : ''}</div>`).join('')}
+            ${D.mesas.map((m, i) => `<div class="mesa-plano libre ${D.sel?.t === 'm' && D.sel.i === i ? 'sel' : ''}" data-el="m${i}" style="${caja(m, H)}">${svgMesa(m)}${textoMesa(m)}${D.sel?.t === 'm' && D.sel.i === i ? '<i class="tirador" data-tirador="1"></i>' : ''}</div>`).join('')}
           </div>
           <small class="tenue">Arrastra para mover; el cuadradito azul de la esquina cambia el tamaño.</small>
         </div>
@@ -2674,8 +2685,12 @@ async function pintarDiseno() {
           ${x ? (D.sel.t === 'm' ? `<h4>Mesa</h4>
               <label>Nombre<input data-campo="nombre" value="${esc(x.nombre)}"></label>
               <label>Forma<select data-campo="forma">${OPCIONES.formamesa.map(([v, t]) => `<option value="${v}" ${x.forma === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-              <div class="fila-ctrl"><span>Comensales</span><button data-d="plazas-">−</button><b>${x.plazas}</b><button data-d="plazas+">+</button></div>`
-            : `<h4>${OBJETOS_SALA[x.tipo].nombre}</h4>`) + `
+              <div class="fila-ctrl"><span>Comensales</span><button data-d="plazas-">−</button><b>${x.plazas}</b><button data-d="plazas+">+</button></div>
+              <h4>Color de la mesa</h4>${muestrasSala('color_fondo', x.color_fondo || '#ffffff', COLORES_MESA)}
+              <h4>Color de la letra</h4>${muestrasSala('color_texto', x.color_texto || '#3c3c3b', COLORES_LETRA)}
+              <div class="fila-ctrl"><span>Letra ${x.letra || 100} %</span><button data-d="letra-">−</button><button data-d="letra+">+</button></div>
+              <button data-d="a-todas">Aplicar colores y letra a todas las mesas</button>`
+            : `<h4>${OBJETOS_SALA[x.tipo].nombre}</h4><h4>Color</h4>${muestrasSala('color', x.color || COLOR_OBJETO[x.tipo], COLORES_OBJETO)}`) + `
               <div class="fila-ctrl"><span>Tamaño</span><button data-d="menor">−</button><button data-d="mayor">+</button></div>
               <button data-d="girar">↻ Girar (horizontal / vertical)</button>
               <button data-d="duplicar">Duplicar</button>
@@ -2701,6 +2716,7 @@ async function pintarDiseno() {
       E.zonaDiseno = Number(b.dataset.zonaD); return pintarDiseno();
     }
     if (b.dataset.color) { D.color = b.dataset.color; cambio(); return pintar(); }
+    if (b.dataset.c && elegido()) { elegido()[b.dataset.c] = b.dataset.v; cambio(); return pintar(); }
     if (b.dataset.plantilla) {
       const [, forma, plazas, ancho, alto] = PLANTILLAS_MESA[Number(b.dataset.plantilla)];
       const k = D.mesas.length % 8;
@@ -2727,6 +2743,9 @@ async function pintarDiseno() {
         break;
       }
       case 'girar': [x.ancho, x.alto] = [x.alto, x.ancho]; break;
+      case 'letra-': x.letra = Math.max(50, (x.letra || 100) - 10); break;
+      case 'letra+': x.letra = Math.min(300, (x.letra || 100) + 10); break;
+      case 'a-todas': for (const m of D.mesas) Object.assign(m, { color_fondo: x.color_fondo || '', color_texto: x.color_texto || '', letra: x.letra || 100 }); aviso('Aplicado a todas las mesas de la zona'); break;
       case 'duplicar': return anadir(D.sel.t, { ...x, id: undefined, nombre: D.sel.t === 'm' ? siguienteNombre() : undefined, px: Math.min(980, x.px + 25), py: x.py + 25 });
       case 'quitar': (D.sel.t === 'm' ? D.mesas : D.objetos).splice(D.sel.i, 1); D.sel = null; break;
       default: return;
@@ -2736,6 +2755,7 @@ async function pintarDiseno() {
   v.onchange = e => {
     const x = elegido();
     if (e.target.dataset.colorLibre !== undefined) { D.color = e.target.value; cambio(); return pintar(); }
+    if (x && e.target.dataset.cLibre) { x[e.target.dataset.cLibre] = e.target.value; cambio(); return pintar(); }
     if (x && e.target.dataset.campo) { x[e.target.dataset.campo] = e.target.value; if (e.target.dataset.campo === 'forma' && x.forma === 'redonda') x.alto = x.ancho; cambio(); pintar(); }
   };
   // Arrastrar para mover y el tirador de la esquina para cambiar el tamaño (en unidades del lienzo, con imán de 5).
