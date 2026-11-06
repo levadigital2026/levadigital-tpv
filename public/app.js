@@ -244,12 +244,22 @@ async function pintarVenta() {
     </section>
     <section class="panel mando">
       <div class="acciones">
-        ${E.datos.botones.filter(b => b.visible && b.accion !== 'configuracion').map(b => `<button data-accion="${esc(b.accion)}" data-id="${b.id}" ${b.color ? `class="color" style="--bc:${esc(b.color)}"` : ''}
-          ${accionActiva(b.accion, c) ? '' : 'disabled'} title="${esc(b.texto)}">${esc(b.texto)}</button>`).join('')}
+        ${E.datos.botones.filter(b => b.visible && b.accion !== 'configuracion').map(b => `<button data-accion="${esc(b.accion)}" data-id="${b.id}" ${b.color ? 'class="color"' : ''}
+          style="${estiloAccion(b)}" ${accionActiva(b.accion, c) ? '' : 'disabled'} title="${esc(b.texto)}">${esc(b.texto)}</button>`).join('')}
       </div>
       <button class="cobrar" id="b-cobrar" ${c?.lineas.length ? '' : 'disabled'}><small>COBRAR</small><b>${euros(c?.total ?? 0)}</b></button>
+      <div class="mando-pie">
+        <button id="b-cajon" title="Abre el cajón de la impresora de tickets de este puesto">Abrir cajón</button>
+        <button id="b-salir" title="Cierra el TPV en esta pantalla">Salir</button>
+      </div>
     </section>
   </div>`;
+}
+
+// Cada botón de la botonera puede ocupar varias columnas (ancho) y filas (alto).
+const columnasBotonera = () => Math.max(1, Math.min(6, Number(E.datos.aspecto?.botonera_cols) || 2));
+function estiloAccion(b, cols = columnasBotonera()) {
+  return `${b.color ? `--bc:${esc(b.color)};` : ''}grid-column:span ${Math.min(b.ancho || 1, cols)};grid-row:span ${b.alto || 1}`;
 }
 
 async function asegurarCuenta() {
@@ -527,6 +537,16 @@ $('#vista').addEventListener('pointerdown', e => {
   orden = { ...g, boton, x0: e.clientX, y0: e.clientY, activo: false };
   orden.t = setTimeout(() => {
     if (!orden) return;
+    // En la botonera, la pulsación larga abre la edición del botón (color, tamaño, posición).
+    if (orden.tabla === 'botones') {
+      const id = Number(orden.id(orden.item));
+      boton.classList.remove('cargando-orden');
+      orden = null;
+      E.sinClic = Date.now() + 400;
+      navigator.vibrate?.(60);
+      if (!tienePermiso('configuracion')) return aviso('No tienes permiso para cambiar la botonera', true);
+      return editarBoton(id);
+    }
     orden.activo = true;
     orden.inicial = orden.items().map(orden.id).join(',');
     boton.classList.remove('cargando-orden');
@@ -631,7 +651,142 @@ $('#vista').addEventListener('click', e => intentar(async () => {
     return pintarVenta();
   }
   if (b.id === 'b-cobrar') return abrirCobro();
+  if (b.id === 'b-cajon') {
+    const r = await api('POST', '/cajon');
+    return aviso(`Cajón abierto (${r.impresora})`);
+  }
+  if (b.id === 'b-salir') return salirTPV();
 }));
+
+// ---------- Editar la botonera desde la pantalla de venta ----------
+const COLORES_BOTON = ['#0064fc', '#00a3e0', '#2e9d4f', '#7cb342', '#f5a300', '#ef6c00', '#e53935', '#c2185b', '#7b1fa2', '#5d4037', '#546e7a', '#0b1527'];
+function editarBoton(id) {
+  const lista = () => E.datos.botones.filter(x => x.accion !== 'configuracion');
+  const paso = (k, v, max) => `<div class="paso"><button data-paso="${k}" data-d="-1" ${v <= 1 ? 'disabled' : ''}>−</button><b>${v}</b><button data-paso="${k}" data-d="1" ${v >= max ? 'disabled' : ''}>+</button></div>`;
+  const guardar = async cambios => {
+    await api('PUT', `/gestion/botones/${id}`, cambios);
+    await cargarDatos();
+    pintarVenta();
+    pintar();
+  };
+  const mover = async d => {
+    const vis = lista().filter(x => x.visible).map(x => x.id);
+    const i = vis.indexOf(id), j = i + d;
+    if (i < 0 || j < 0 || j >= vis.length) return;
+    const ids = E.datos.botones.map(x => x.id);
+    const a = ids.indexOf(vis[i]), b = ids.indexOf(vis[j]);
+    [ids[a], ids[b]] = [ids[b], ids[a]];
+    await api('POST', '/gestion/botones/ordenar', { ids });
+    await cargarDatos();
+    pintarVenta();
+    pintar();
+  };
+  const pintar = () => {
+    const b = E.datos.botones.find(x => x.id === id);
+    if (!b) return cerrarModal();
+    const n = columnasBotonera();
+    const visibles = lista().filter(x => x.visible);
+    const ocultos = lista().filter(x => !x.visible);
+    abrirModal(`<h2><span>Editar botón</span><button data-m="cerrar">✕</button></h2>
+      <div class="editar-boton">
+        <div class="eb-opciones">
+          <label class="eb-texto">Texto<input id="eb-texto" value="${esc(b.texto)}" maxlength="30"></label>
+          <div class="eb-fila"><span>Color</span><div class="eb-colores">
+            <button data-color="" class="normal ${!b.color ? 'activo' : ''}">Normal</button>
+            ${COLORES_BOTON.map(c => `<button data-color="${c}" style="--mc:${c}" class="${b.color === c ? 'activo' : ''}"></button>`).join('')}
+            <button data-m="otro" class="otro ${b.color && !COLORES_BOTON.includes(b.color) ? 'activo' : ''}" ${b.color && !COLORES_BOTON.includes(b.color) ? `style="--mc:${esc(b.color)}"` : ''}>Otro…</button></div></div>
+          <div class="eb-fila"><span>Ancho</span>${paso('ancho', Math.min(b.ancho || 1, n), n)}<small>columnas</small></div>
+          <div class="eb-fila"><span>Alto</span>${paso('alto', b.alto || 1, 4)}<small>filas</small></div>
+          <div class="eb-fila"><span>Posición</span><div class="eb-mover"><button data-mover="-1">◀ Antes</button><button data-mover="1">Después ▶</button></div></div>
+          <div class="eb-fila"><span>Botones por fila</span>${paso('cols', n, 6)}<small>en toda la botonera</small></div>
+          <div class="eb-fila">${b.visible ? '<button data-m="ocultar" class="peligro">Quitar de la botonera</button>' : '<button data-m="mostrar" class="primario">Poner en la botonera</button>'}</div>
+          ${ocultos.length ? `<div class="eb-fila eb-ocultos"><span>Quitados</span><div>${ocultos.map(o => `<button data-editar="${o.id}" class="${o.id === id ? 'activo' : ''}">${esc(o.texto)}</button>`).join('')}</div></div>` : ''}
+        </div>
+        <div class="eb-vista">
+          <small>Así queda la botonera. Toca otro botón para editarlo.</small>
+          <div class="acciones eb-previa" style="--a-botonera_cols:${n}">${visibles.map(x => `<button data-editar="${x.id}" class="${x.color ? 'color' : ''} ${x.id === id ? 'editando' : ''}" style="${estiloAccion(x, n)}">${esc(x.texto)}</button>`).join('')}</div>
+          <div class="eb-pie"><button data-m="cerrar" class="primario">Listo</button></div>
+        </div>
+      </div>`);
+    $('#modal-caja').classList.add('ancho');
+    $('#modal-caja').onchange = e => { if (e.target.id === 'eb-texto' && e.target.value.trim()) intentar(() => guardar({ texto: e.target.value.trim() })); };
+    $('#modal-caja').onclick = e => intentar(async () => {
+      const t = e.target.closest('button');
+      if (!t) return;
+      if (t.dataset.m === 'cerrar') return cerrarModal();
+      if (t.dataset.editar) { id = Number(t.dataset.editar); return pintar(); }
+      if (t.dataset.color !== undefined) return guardar({ color: t.dataset.color });
+      if (t.dataset.m === 'otro') {
+        const c = await elegirColor(b.color, false);
+        return c === null ? pintar() : guardar({ color: c });
+      }
+      if (t.dataset.paso === 'ancho') return guardar({ ancho: Math.min(b.ancho || 1, n) + Number(t.dataset.d) });
+      if (t.dataset.paso === 'alto') return guardar({ alto: (b.alto || 1) + Number(t.dataset.d) });
+      if (t.dataset.paso === 'cols') {
+        E.datos.aspecto = await api('PUT', '/aspecto', { ...E.datos.aspecto, botonera_cols: n + Number(t.dataset.d) });
+        aplicarAspecto(E.datos.aspecto);
+        pintarVenta();
+        return pintar();
+      }
+      if (t.dataset.mover) return mover(Number(t.dataset.mover));
+      if (t.dataset.m === 'ocultar') return guardar({ visible: 0 });
+      if (t.dataset.m === 'mostrar') return guardar({ visible: 1 });
+    });
+  };
+  pintar();
+}
+
+// ---------- Salir ----------
+async function salirTPV() {
+  if (!confirm('¿Salir del TPV en esta pantalla?')) return;
+  E.sinPantallaCompleta = true;
+  if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  ponerOperario(null);
+  window.close();
+  // Si el navegador no deja cerrar la ventana, se queda una pantalla de "cerrado".
+  setTimeout(() => {
+    document.body.innerHTML = `<div class="tpv-cerrado"><img src="/icono-192.png" alt=""><h1>TPV cerrado</h1>
+      <p>Ya puedes cerrar esta ventana.</p><button id="b-volver">Volver a entrar</button></div>`;
+    document.getElementById('b-volver').onclick = () => location.reload();
+  }, 300);
+}
+
+// ---------- Pantalla completa ----------
+// Al primer toque se pone en pantalla completa (el navegador no deja hacerlo sin un toque).
+// Mantener pulsado 3 segundos el logo la quita (y vuelve a ponerla). Se puede desactivar
+// en Configuración > Tamaño en esta pantalla.
+const pantallaCompletaActiva = () => { try { return localStorage.getItem('pantallaCompleta') !== '0'; } catch { return true; } };
+function entrarPantallaCompleta() {
+  if (E.sinPantallaCompleta || !pantallaCompletaActiva() || document.fullscreenElement || !document.documentElement.requestFullscreen) return;
+  document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+}
+document.addEventListener('click', entrarPantallaCompleta, true);
+document.addEventListener('keydown', entrarPantallaCompleta, true);
+{
+  const logo = $('.marca');
+  let t = null;
+  const parar = () => { clearTimeout(t); t = null; logo.classList.remove('cargando-orden'); };
+  logo.addEventListener('pointerdown', () => {
+    parar();
+    logo.classList.add('cargando-orden');
+    t = setTimeout(() => {
+      logo.classList.remove('cargando-orden');
+      navigator.vibrate?.(60);
+      if (document.fullscreenElement) {
+        E.sinPantallaCompleta = true;
+        document.exitFullscreen().catch(() => {});
+        aviso('Pantalla completa quitada. Mantén pulsado el logo 3 segundos para volver.');
+      } else {
+        // Al soltar el dedo (que cuenta como toque) vuelve a pantalla completa.
+        E.sinPantallaCompleta = false;
+        try { localStorage.setItem('pantallaCompleta', '1'); } catch {}
+        aviso('Suelta para volver a pantalla completa');
+      }
+    }, PULSACION_ORDENAR_MS);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => logo.addEventListener(ev, () => { if (t) parar(); }));
+  logo.addEventListener('contextmenu', e => e.preventDefault());
+}
 
 // ---------- Cobro ----------
 // Cobro con varios pagos: se van añadiendo importes en distintas formas de pago hasta cubrir el total.
@@ -1382,7 +1537,7 @@ const SECCIONES_CONFIG = [
   ['Personalización', [
     ['empresa', 'Datos de empresa', 'Nombre, NIF, dirección y serie'],
     ['aspecto', 'Aspecto', 'Tamaño de zonas y botones, colores'],
-    ['escala', 'Tamaño en esta pantalla', 'Automático o fijo para este TPV'],
+    ['escala', 'Tamaño en esta pantalla', 'Tamaño y pantalla completa de este TPV'],
     ['botones', 'Botonera', 'Botones de la pantalla de venta'],
   ]],
 ];
@@ -1479,10 +1634,19 @@ function elegirEscala() {
     const actual = escalaElegida();
     abrirModal(`<h2><span>Tamaño en esta pantalla</span><button data-m="cerrar">✕</button></h2>
       <div class="form"><p class="nota">Pantalla de ${screen.width}×${screen.height}. "Automático" lo ajusta solo según el tamaño; si prefieres, fija uno. Se guarda solo en este dispositivo.</p>
-      <div class="po-nombres ordenes">${ESCALAS.map(([v, t]) => `<button data-escala="${v}" class="${v === actual ? 'activo' : ''}"><b>${t}</b></button>`).join('')}</div></div>`);
+      <div class="po-nombres ordenes">${ESCALAS.map(([v, t]) => `<button data-escala="${v}" class="${v === actual ? 'activo' : ''}"><b>${t}</b></button>`).join('')}</div>
+      <h3>Pantalla completa al entrar</h3>
+      <p class="nota">Se pone al primer toque. Para quitarla, mantén pulsado el logo de arriba 3 segundos.</p>
+      <div class="po-nombres ordenes">${[['1', 'Sí'], ['0', 'No']].map(([v, t]) => `<button data-completa="${v}" class="${(pantallaCompletaActiva() ? '1' : '0') === v ? 'activo' : ''}"><b>${t}</b></button>`).join('')}</div></div>`);
     $('#modal-caja').onclick = e => {
       const b = e.target.closest('button');
       if (b?.dataset.m === 'cerrar') return cerrarModal();
+      if (b?.dataset.completa) {
+        try { localStorage.setItem('pantallaCompleta', b.dataset.completa); } catch {}
+        E.sinPantallaCompleta = b.dataset.completa === '0';
+        if (E.sinPantallaCompleta && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        return pintar();
+      }
       if (b?.dataset.escala) {
         try { localStorage.setItem('escala', b.dataset.escala); } catch {}
         ajustarEscala();

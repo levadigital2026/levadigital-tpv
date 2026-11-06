@@ -29,6 +29,7 @@ const ACCIONES: [string, RegExp, string][] = [
   ['DELETE', /^\/api\/lineas\/\d+$/, 'Borrar línea'],
   ['POST', /^\/api\/tickets\/\d+\/anular$/, 'Anular ticket'],
   ['POST', /^\/api\/caja\/cierre$/, 'Cierre de caja'],
+  ['POST', /^\/api\/cajon$/, 'Abrir cajón'],
   ['PUT', /^\/api\/empresa$/, 'Cambiar datos de empresa'],
   ['PUT', /^\/api\/aspecto$/, 'Cambiar aspecto de la pantalla'],
   ['POST', /^\/api\/imagenes$/, 'Subir imagen'],

@@ -69,7 +69,7 @@ export const TABLAS: Record<string, Record<string, Campo>> = {
   comentarios: { texto: { tipo: 'texto', obligatorio: true }, familia_id: { tipo: 'ref' }, articulo_id: { tipo: 'ref' }, orden: { tipo: 'entero' } },
   botones: {
     accion: { tipo: 'texto', obligatorio: true, valores: Object.keys(ACCIONES) }, texto: { tipo: 'texto', obligatorio: true },
-    color: { tipo: 'texto' }, orden: { tipo: 'entero' }, visible: { tipo: 'bool' },
+    color: { tipo: 'texto' }, orden: { tipo: 'entero' }, visible: { tipo: 'bool' }, ancho: { tipo: 'entero' }, alto: { tipo: 'entero' },
   },
 };
 
@@ -172,10 +172,15 @@ function normalizarImpresoras(v: Record<string, unknown>) {
   v.impresoras = p.includes('ninguna') ? 'ninguna' : [...new Set(p.filter(x => /^\d+$/.test(x)))].join(',');
 }
 
+function medidasBoton(v: Record<string, unknown>) {
+  for (const k of ['ancho', 'alto']) if (k in v && v[k] !== undefined) v[k] = Math.max(1, Math.min(6, Number(v[k]) || 1));
+}
+
 export function crear(db: DB, tabla: string, datos: Record<string, unknown>) {
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, true);
   normalizarImpresoras(v);
+  medidasBoton(v);
   rfidLibre(db, tabla, v, null);
   const cols = Object.keys(v);
   const r = db.prepare(`INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
@@ -198,6 +203,7 @@ export function actualizar(db: DB, tabla: string, id: number, datos: Record<stri
   comprobarTabla(tabla);
   const v = limpiar(tabla, datos, false);
   normalizarImpresoras(v);
+  medidasBoton(v);
   if (tabla === 'puestos' && v.smtp_clave === CLAVE_OCULTA) delete v.smtp_clave;
   rfidLibre(db, tabla, v, id);
   if (tabla === 'familias' && v.padre_id != null) evitarCiclo(db, id, Number(v.padre_id));

@@ -450,6 +450,9 @@ function migrar(db: DB) {
   // Plano de las zonas: color de fondo y mesas con forma, plazas, posición y tamaño (en un lienzo de 1000 de ancho).
   anadirColumna(db, 'impresoras', 'envio', "TEXT NOT NULL DEFAULT 'auto'");
   anadirColumna(db, 'impresoras', 'imprimir_barra', 'INTEGER NOT NULL DEFAULT 0');
+  // Botonera editable en pantalla: cada botón ocupa las columnas y filas que se quiera.
+  anadirColumna(db, 'botones', 'ancho', 'INTEGER NOT NULL DEFAULT 1');
+  anadirColumna(db, 'botones', 'alto', 'INTEGER NOT NULL DEFAULT 1');
   anadirColumna(db, 'zonas', 'color_fondo', "TEXT NOT NULL DEFAULT ''");
   anadirColumna(db, 'mesas', 'forma', "TEXT NOT NULL DEFAULT 'cuadrada'");
   anadirColumna(db, 'mesas', 'plazas', 'INTEGER NOT NULL DEFAULT 4');
@@ -540,6 +543,13 @@ function migrar(db: DB) {
         upd.run(Math.round(30 + m.x * paso), Math.round(30 + m.y * paso), t, t, m.id);
       }
     });
+    // Quien podía cobrar también puede abrir el cajón.
+    unaVez('permiso_abrir_cajon', () => {
+      for (const o of db.prepare('SELECT id, permisos FROM operarios').all() as { id: number; permisos: string }[]) {
+        const p = String(o.permisos).split(',').filter(Boolean);
+        if (p.includes('cobrar') && !p.includes('abrir_cajon')) db.prepare('UPDATE operarios SET permisos = ? WHERE id = ?').run([...p, 'abrir_cajon'].join(','), o.id);
+      }
+    });
     // Quien ya podía entrar en configuración (encargado) también puede invitar.
     unaVez('permiso_invitar', () => {
       for (const o of db.prepare('SELECT id, permisos FROM operarios').all() as { id: number; permisos: string }[]) {
@@ -606,6 +616,7 @@ export const PERMISOS: Record<string, string> = {
   cierre_caja: 'Cierre de caja',
   ver_cuadre: 'Ver el cuadre de caja (cierre ciego)',
   invitar: 'Invitar (artículos a 0 €)',
+  abrir_cajon: 'Abrir el cajón sin cobrar',
   configuracion: 'Entrar en configuración e informes',
 };
 

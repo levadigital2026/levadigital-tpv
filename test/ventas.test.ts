@@ -900,3 +900,25 @@ test('comandas: la barra no imprime salvo impresora con "imprimir barra"; al pas
     assert.equal((await api('POST', `/cuentas/${c2.id}/comanda/enviar`, { modo: 'auto' })).data.enviadas.length, 1);
   } finally { await cerrar(); srv.close(); }
 });
+
+test('botonera editable: ancho y alto de cada botón; abrir cajón por la impresora de tickets del puesto', async () => {
+  const { api, cerrar } = await arrancar();
+  const recibido: Buffer[] = [];
+  const srv = createServer(s => { const d: Buffer[] = []; s.on('data', x => d.push(x)); s.on('end', () => recibido.push(Buffer.concat(d))); });
+  await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
+  try {
+    const ini = (await api('GET', '/inicio')).data;
+    const b = ini.botones[0];
+    const r = (await api('PUT', `/gestion/botones/${b.id}`, { ancho: 2, alto: 9 })).data;
+    assert.equal(r.ancho, 2);
+    assert.equal(r.alto, 6);
+    const p = (await api('GET', '/gestion/puestos')).data[0];
+    const cab = { 'x-puesto': String(p.id) };
+    assert.equal((await api('POST', '/cajon', {}, cab)).status, 400);
+    const imp = (await api('POST', '/gestion/impresoras', { nombre: 'Tickets', uso: 'tickets', ip: '127.0.0.1', puerto: (srv.address() as AddressInfo).port })).data;
+    await api('PUT', `/gestion/puestos/${p.id}`, { impresora_tickets_id: imp.id });
+    assert.equal((await api('POST', '/cajon', {}, cab)).data.abierto, true);
+    await new Promise(res => setTimeout(res, 50));
+    assert.deepEqual([...recibido[0]], [0x1b, 0x40, 0x1b, 0x70, 0, 25, 250]);
+  } finally { await cerrar(); srv.close(); }
+});

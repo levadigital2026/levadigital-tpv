@@ -98,6 +98,7 @@ ruta('POST', '/api/cuentas/:id/marchar', async ({ db, params, body }) => {
   r.impresoras = await comandas.imprimirMarcha(db, num(params[0]), Number(body?.orden_plato_id), r.texto);
   return r;
 });
+ruta('POST', '/api/cajon', ({ db }) => comandas.abrirCajon(db));
 ruta('GET', '/api/cuentas/:id/comanda/pendiente', ({ db, params }) => comandas.pendienteComanda(db, num(params[0])));
 ruta('POST', '/api/cuentas/:id/comanda/enviar', ({ db, params, body }) => comandas.enviarComanda(db, num(params[0]), body?.modo));
 ruta('GET', '/api/cocina/marchas', ({ db }) => db.prepare('SELECT * FROM marchas ORDER BY id DESC LIMIT 50').all());

@@ -107,6 +107,16 @@ export async function enviarComanda(db: DB, cuentaId: number, modo: 'auto' | 'en
   return { enviadas: resultado };
 }
 
+// Abrir el cajón: impulso ESC/POS a la impresora de tickets del puesto (el cajón va conectado a ella).
+export async function abrirCajon(db: DB) {
+  if (!contexto.puesto) throw new ErrorTPV('Elige primero qué puesto es esta pantalla (Configuración > Local > Puesto de este dispositivo)');
+  const imp = db.prepare('SELECT i.* FROM puestos p JOIN impresoras i ON i.id = p.impresora_tickets_id WHERE p.id = ?').get(contexto.puesto) as Row | undefined;
+  if (!imp) throw new ErrorTPV('Este puesto no tiene impresora de tickets: ponla en Configuración > Local > Puestos');
+  try { await enviarAImpresora(imp.ip, imp.puerto, Buffer.from([ESC, 0x40, ESC, 0x70, 0, 25, 250])); }
+  catch (e: any) { throw new ErrorTPV(`No se pudo abrir el cajón (${imp.nombre}: ${e.message})`); }
+  return { abierto: true, impresora: imp.nombre };
+}
+
 // "Marchar": también sale en las impresoras que tienen platos de ese orden en la cuenta.
 export async function imprimirMarcha(db: DB, cuentaId: number, ordenPlatoId: number, texto: string) {
   const lineas = db.prepare('SELECT articulo_id FROM lineas WHERE cuenta_id = ? AND orden_plato_id = ?').all(cuentaId, ordenPlatoId) as Row[];
